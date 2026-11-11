@@ -187,6 +187,17 @@ describe("privacy", () => {
 });
 
 describe("setup checklist", () => {
+  it("marks only the signed-in member's devices as editable, including for village owners", async () => {
+    const m = await memberWithDevice("Editor", "Member PC");
+    const pair = await api("/pair", { cookie: m.own, method: "POST" });
+    const ownDevice = await api("/connect", { body: { code: pair.data.code, pc: "Owner PC" } });
+    const ownerDevices = (await api("/devices", { cookie: m.own })).data.devices;
+    expect(ownerDevices.find((d: any) => d.id === m.device.deviceId).editable).toBe(false);
+    expect(ownerDevices.find((d: any) => d.id === ownDevice.data.deviceId).editable).toBe(true);
+    const memberDevices = (await api("/devices", { cookie: m.cookie })).data.devices;
+    expect(memberDevices.find((d: any) => d.id === m.device.deviceId).editable).toBe(true);
+    expect(memberDevices.some((d: any) => d.id === ownDevice.data.deviceId)).toBe(false);
+  });
   it("tracks which agents have hooks installed and which have reported in", async () => {
     const own = await owner();
     const pair = await api("/pair", { cookie: own, method: "POST" });

@@ -146,6 +146,17 @@ a {
   margin-top: 14px;
   padding-top: 10px;
 }
+.setup-tabs {
+  margin-bottom: 14px;
+}
+.setup-tabs button[aria-pressed="true"],
+.edit-devices button[aria-pressed="true"] {
+  outline: 2px solid currentColor;
+  outline-offset: 1px;
+}
+.edit-devices button {
+  margin: 0 8px 10px 0;
+}
 .connect-step h3 {
   font-size: 12px;
   margin: 12px 0 8px;

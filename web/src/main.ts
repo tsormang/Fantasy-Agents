@@ -60,6 +60,9 @@ async function main(): Promise<void> {
   const connectBtn = el("button", { textContent: "Connect PC" });
   connectBtn.onclick = () => void connectModal(root);
   const actions: HTMLElement[] = [connectBtn];
+  const editBtn = el("button", { class: "quiet", textContent: "Edit agents" });
+  editBtn.onclick = () => void connectModal(root, "edit");
+  actions.push(editBtn);
   if (me.role === "owner") actions.push(el("a", { class: "btn quiet", href: modePath("/admin"), textContent: "Council" }));
   const out = el("button", { class: "quiet", textContent: "Leave" });
   out.title = `Signed in as ${me.name}`;

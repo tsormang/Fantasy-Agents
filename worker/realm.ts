@@ -299,7 +299,7 @@ export class Realm extends DurableObject<Env> {
 
   private listDevices(me: Member): Response {
     const q =
-      "SELECT d.id, d.name, d.created, d.last_seen, d.reported, d.proto, m.name AS owner FROM devices d JOIN members m ON m.id = d.member_id";
+      "SELECT d.id, d.name, d.member_id, d.created, d.last_seen, d.reported, d.proto, m.name AS owner FROM devices d JOIN members m ON m.id = d.member_id";
     const devices =
       me.role === "owner"
         ? this.sql.exec(`${q} ORDER BY d.created`).toArray()
@@ -308,7 +308,9 @@ export class Realm extends DurableObject<Env> {
     return json({
       now: Date.now(),
       devices: devices.map((d) => ({
-        ...d,
+        id: d.id, name: d.name, created: d.created, last_seen: d.last_seen,
+        reported: d.reported, proto: d.proto, owner: d.owner,
+        editable: d.member_id === me.id,
         agents: hooks.filter((h) => h.device_id === d.id).map((h) => ({ agent: h.agent, seen: h.seen })),
       })),
     });

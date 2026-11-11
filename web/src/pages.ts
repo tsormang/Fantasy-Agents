@@ -125,6 +125,8 @@ interface Device {
   id: string;
   name: string;
   owner: string;
+  /** Only the signed-in member's own PCs can be edited. */
+  editable: boolean;
   created: number;
   /** false for PCs paired before the connector reported its tools */
   reported: number;
@@ -173,32 +175,41 @@ export function projectsCommand(projects: { path: string; name?: string }[]): st
   return `node -e "const f=require('path').join(require('os').homedir(),'.fantasy-agents','fa.mjs');const projects=JSON.parse(Buffer.from('${encoded}','base64').toString('utf8'));for(const p of projects){const args=[f,'allow',p.path];if(p.name)args.push('--as',p.name);const r=require('child_process').spawnSync(process.execPath,args,{stdio:'inherit'});if(r.error||r.status!==0)process.exit(r.status||1)}"`;
 }
 
-function projectFields(): HTMLElement {
+export function editProjectsCommand(projects: { path: string; name?: string; previousPath?: string }[]): string {
+  const encoded = btoa(Array.from(new TextEncoder().encode(JSON.stringify(projects)), (b) => String.fromCharCode(b)).join(""));
+  return `node -e "const fs=require('fs'),path=require('path'),f=path.join(require('os').homedir(),'.fantasy-agents','fa.mjs');const projects=JSON.parse(Buffer.from('${encoded}','base64').toString('utf8'));const canon=p=>{let s=path.resolve(p);try{s=fs.realpathSync(s)}catch{}return process.platform==='win32'||process.platform==='darwin'?s.toLowerCase():s};for(const p of projects){if(!fs.statSync(p.path).isDirectory())throw Error('Not a folder: '+p.path)}const run=args=>{const r=require('child_process').spawnSync(process.execPath,[f,...args],{stdio:'inherit'});if(r.error||r.status!==0)process.exit(r.status||1)};for(const p of projects){const args=['allow',p.path];if(p.name)args.push('--as',p.name);run(args)}const targets=new Set(projects.map(p=>canon(p.path)));const saved=JSON.parse(fs.readFileSync(path.join(path.dirname(f),'config.json'),'utf8'));const allowed=new Set((saved.projects||[]).map(p=>canon(p.path)));for(const target of targets){if(!allowed.has(target))throw Error('New folder was not allowed; old paths were kept')}for(const p of projects){if(p.previousPath&&!targets.has(canon(p.previousPath)))run(['disallow',p.previousPath])}"`;
+}
+
+function projectFields(edit = false): HTMLElement {
   const fields = el("div", {});
   const command = el("code", { class: "cmd grow" });
   const copy = copyButton(() => command.textContent || "");
   const output = el("div", { class: "row project-command" }, command, copy);
   const hint = el("p", { class: "dim", textContent: "Enter a project path above to generate your command." });
-  const inputs: { path: HTMLInputElement; name: HTMLInputElement }[] = [];
+  const inputs: { path: HTMLInputElement; name: HTMLInputElement; previous: HTMLInputElement }[] = [];
   const update = () => {
-    const projects = inputs.filter((input) => input.path.value.trim()).map((input) => ({ path: input.path.value, name: input.name.value.trim() }));
-    command.textContent = projects.length ? projectsCommand(projects) : "";
+    const projects = inputs.map((input) => ({ path: input.path.value || (edit ? input.previous.value : ""), name: input.name.value.trim(), ...(edit ? { previousPath: input.previous.value } : {}) })).filter((p) => p.path.trim());
+    command.textContent = projects.length ? (edit ? editProjectsCommand(projects) : projectsCommand(projects)) : "";
     output.hidden = !projects.length;
     hint.hidden = !!projects.length;
   };
-  const addField = (focus = true) => {
+  const addField = (focus = true, project?: { path: string; name?: string }) => {
     const input = el("input", { type: "text", placeholder: "C:\\Projects\\MyApp or /home/you/projects/my-app", autocomplete: "off", spellcheck: false });
+    const previous = el("input", { type: "text", placeholder: "Current allowed folder path", autocomplete: "off", spellcheck: false, value: project?.path || "" });
     const name = el("input", { type: "text", placeholder: "e.g. Lemnos", maxLength: 40, autocomplete: "off", spellcheck: false });
+    name.value = project?.name || "";
     const label = el("span", { textContent: `Project path ${inputs.length + 1}` });
     const remove = el("button", { class: "quiet", type: "button", textContent: "Remove" });
     const row = el("div", { class: "project-path" },
       el("div", { class: "project-details" },
-        el("label", {}, label, input),
+        ...(edit ? [el("label", {}, label, previous)] : []),
+        el("label", {}, edit ? el("span", { textContent: "New path (optional; blank keeps current path)" }) : label, input),
         el("label", {}, el("span", { textContent: "Project name (optional)" }), name)), remove);
-    const entry = { path: input, name };
+    const entry = { path: input, name, previous };
     inputs.push(entry);
     input.oninput = update;
     name.oninput = update;
+    previous.oninput = update;
     remove.onclick = () => {
       inputs.splice(inputs.indexOf(entry), 1);
       row.remove();
@@ -207,23 +218,49 @@ function projectFields(): HTMLElement {
       update();
     };
     fields.append(row);
-    if (focus) input.focus();
+    if (focus) (edit ? previous : input).focus();
   };
   const add = el("button", { class: "quiet", type: "button", textContent: "+ Add project path" });
   add.onclick = () => addField();
   addField(false);
   update();
+  const importBox = el("div", {});
+  if (edit) {
+    const file = el("input", { type: "file", accept: ".json,application/json" });
+    const error = el("p", { class: "err" });
+    file.onchange = async () => {
+      error.textContent = "";
+      try {
+        if (!file.files?.[0]) return;
+        const config = JSON.parse(await file.files[0].text());
+        const projects: unknown = config.projects;
+        if (!Array.isArray(projects) || !projects.every((p) => p && typeof p.path === "string" && (!p.name || typeof p.name === "string"))) throw new Error("Choose the connector config.json file containing a projects list.");
+        fields.replaceChildren();
+        inputs.splice(0);
+        for (const p of projects) addField(false, { path: p.path, name: p.name });
+        if (!inputs.length) addField(false);
+        update();
+      } catch (x) { error.textContent = (x as Error).message; }
+    };
+    importBox.append(
+      el("p", { textContent: "Enter an existing path below, or load project paths and names from this PC's connector settings." }),
+      el("label", {}, el("span", { textContent: "Load settings: .fantasy-agents/config.json in your home folder" }), file),
+      el("p", { class: "dim", textContent: "The file is read only in this browser. Only project paths and names are used; the device token is never uploaded or saved." }), error,
+    );
+  }
   return el("div", { class: "project-setup" },
-    el("p", { textContent: "Choose the project folders agents can report from on this PC. Subfolders and git worktrees are included." }),
+    el("p", { textContent: edit ? "Edit the allowed folders and project names on your PC. These settings apply to every agent tool using that folder." : "Choose the project folders agents can report from on this PC. Subfolders and git worktrees are included." }),
+    importBox,
     el("p", { class: "dim", textContent: "Give each path a project name for viewers to see, or leave it blank to use the folder name." }),
     fields, el("p", {}, add), hint,
     el("p", { textContent: "Copy and run the generated command in a terminal on this PC, then start a new agent session in an allowed folder and send a prompt." }),
     output,
+    ...(edit ? [el("p", { class: "dim", textContent: "Changing a path allows the new folder and removes the old allowance. Other allowed folders stay as they are. Remove only removes a row from this command. Run the command on the selected PC to apply your edits." })] : []),
     el("p", { class: "dim", textContent: "Paths stay in this dialog and are never sent to the server. Running the command saves the allowed folders and names on your PC; viewers see the project name (or folder name if blank). Adding a field here does not allow the folder until you run the command." }),
   );
 }
 
-export async function connectModal(root: HTMLElement): Promise<void> {
+export async function connectModal(root: HTMLElement, initialTab: "connect" | "edit" = "connect"): Promise<void> {
   const intro = el("div", {});
   const pairBox = el("div", {});
   const devicesEl = el("ul", { class: "list" });
@@ -232,13 +269,30 @@ export async function connectModal(root: HTMLElement): Promise<void> {
   const selectedPC = el("p", { textContent: "Connect a PC in step 1 to continue." });
   const projectPanels = new Map<string, HTMLElement>();
   let selectedId: string | null = null;
+  const editDevices = el("div", { class: "edit-devices" });
+  const editHost = el("div", {});
+  const editPanels = new Map<string, HTMLElement>();
+  let editId: string | null = null;
+  const connectContent = el("div", {},
+    el("section", { class: "connect-step" }, el("h2", { textContent: "Step 1: Connect PC" }), intro, pairBox, el("h3", { textContent: "Connected PCs" }), devicesEl),
+    el("section", { class: "connect-step" }, el("h2", { textContent: "Step 2: Connect Agents" }), selectedPC, projectHost, checklist));
+  const editContent = el("div", {}, el("h2", { textContent: "Edit your agents" }), editDevices, editHost);
+  const connectTab = el("button", { class: "quiet", textContent: "Connect", type: "button" });
+  const editTab = el("button", { class: "quiet", textContent: "Edit", type: "button" });
+  const selectTab = (tab: "connect" | "edit") => {
+    connectContent.hidden = tab !== "connect";
+    editContent.hidden = tab !== "edit";
+    connectTab.setAttribute("aria-pressed", String(tab === "connect"));
+    editTab.setAttribute("aria-pressed", String(tab === "edit"));
+  };
+  connectTab.onclick = () => selectTab("connect");
+  editTab.onclick = () => selectTab("edit");
+  selectTab(initialTab);
   const close = el("button", { class: "quiet", textContent: "Close" });
   const modal = el(
     "div",
     { class: "modal" },
-    el("div", { class: "box" }, el("h1", { textContent: "Connect" }),
-      el("section", { class: "connect-step" }, el("h2", { textContent: "Step 1: Connect PC" }), intro, pairBox, el("h3", { textContent: "Connected PCs" }), devicesEl),
-      el("section", { class: "connect-step" }, el("h2", { textContent: "Step 2: Connect Agents" }), selectedPC, projectHost, checklist), close),
+    el("div", { class: "box" }, el("h1", { textContent: "Agent setup" }), el("div", { class: "row setup-tabs" }, connectTab, editTab), connectContent, editContent, close),
   );
   let timer = 0;
   close.onclick = () => {
@@ -251,6 +305,21 @@ export async function connectModal(root: HTMLElement): Promise<void> {
   /** Which PC is being tested, and from what moment an event counts as a pass. */
   let testing: { id: string; since: number } | null = null;
   let pairing = false;
+
+  const renderEdit = (list: Device[]) => {
+    const own = list.filter((d) => d.editable);
+    if (!own.some((d) => d.id === editId)) editId = own.find((d) => d.id === recall())?.id || own[0]?.id || null;
+    editDevices.replaceChildren(...own.map((d) => {
+      const button = el("button", { class: "quiet", textContent: d.name, type: "button" });
+      button.setAttribute("aria-pressed", String(d.id === editId));
+      button.onclick = () => { editId = d.id; renderEdit(list); };
+      return button;
+    }));
+    if (!editId) return editHost.replaceChildren(el("p", { class: "dim", textContent: "You have no connected PCs to edit. Use Connect to add your PC first. You can edit only your own agents." }));
+    if (!editPanels.has(editId)) editPanels.set(editId, el("div", {}, el("h3", { textContent: `Projects on "${own.find((d) => d.id === editId)!.name}"` }), projectFields(true)));
+    const panel = editPanels.get(editId)!;
+    if (editHost.firstChild !== panel) editHost.replaceChildren(panel);
+  };
 
   const showPair = async () => {
     if (pairing) return;
@@ -423,6 +492,7 @@ export async function connectModal(root: HTMLElement): Promise<void> {
     if (!list.length) devicesEl.append(el("li", { class: "dim" }, el("span", { textContent: "No PCs connected yet." })));
     renderIntro(list);
     renderChecklist(list, now);
+    renderEdit(list);
   };
 
   try {
