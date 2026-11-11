@@ -2,6 +2,12 @@
 
 A live battlefield for your coding agents, drawn with the Tiny Swords art pack. Every Claude Code, Codex or Cursor session in a project folder you allowed on a connected PC is a hero: idle heroes rest in the village, working heroes cross the bridge and fight the black army's raiders and lancers until the task is done.
 
+In Connect or Edit, choose a name category for each allowed path: Latin, Gothic, Ancient Greek, Korean, Fantasy, Aristocrat, Norse, or Celtic. Run the generated command on that PC. Each session receives a random name from its category, shared by all viewers and kept across status updates. Changing category assigns a new name on the next event. Older custom aliases continue to work as project labels and default to Fantasy hero names.
+
+Click your own resting hero, on the battlefield or in the Heroes list, to remove it from the village. This does not disconnect its PC or change allowed folders. Repeated idle events do not bring it back; resumed work does. A dismissal record retains its name for up to 12 hours, then expires. Working agents, other people's agents, and spectator views do not offer removal.
+
+The generated commands use the connector's existing alias option with a reserved `@names:<category>` value, so installed connectors can select categories without reinstalling hooks. The server stores assigned hero names and categories alongside session state; paths remain local to the PC.
+
 | Agent | Class | Activity on screen |
 | --- | --- | --- |
 | Claude Code | Monk (casts bolts) | edit = sparks, command = explosion, search/read = scrying ring, web = arcane ring, sub-agent = familiar |

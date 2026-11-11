@@ -12,6 +12,7 @@ import {
 } from "../shared/protocol";
 import { COOKIE, bearer, hashToken, newId, newToken, readCookie, sameOrigin, sessionCookie } from "./auth";
 import type { Env } from "./index";
+import { NAME_CATEGORIES, nameCategory, randomAgentName, type NameCategory } from "../shared/names";
 
 const YEAR_S = 365 * 24 * 3600;
 const PAIR_TTL_MS = 10 * 60_000;
@@ -59,6 +60,10 @@ export class Realm extends DurableObject<Env> {
       CREATE TABLE IF NOT EXISTS agents (id TEXT PRIMARY KEY, device_id TEXT NOT NULL, agent TEXT NOT NULL, project TEXT NOT NULL,
         status TEXT NOT NULL, activity TEXT, since INTEGER NOT NULL, last INTEGER NOT NULL, kills INTEGER NOT NULL);
     `);
+    for (const column of ["hero_name TEXT NOT NULL DEFAULT ''", "name_category TEXT NOT NULL DEFAULT ''"]) {
+      try { this.sql.exec(`ALTER TABLE agents ADD COLUMN ${column}`); } catch { /* already migrated */ }
+    }
+    this.sql.exec("CREATE TABLE IF NOT EXISTS dismissed_agents (id TEXT PRIMARY KEY, device_id TEXT NOT NULL, removed INTEGER NOT NULL, hero_name TEXT NOT NULL, name_category TEXT NOT NULL)");
     try {
       // Added after the first release: whether the connector told us which tools it set up.
       this.sql.exec("ALTER TABLE devices ADD COLUMN reported INTEGER NOT NULL DEFAULT 0");
@@ -103,6 +108,8 @@ export class Realm extends DurableObject<Env> {
       if (path === "/devices" && m === "GET") return this.listDevices(me);
       const dev = path.match(/^\/devices\/([\w-]+)$/);
       if (dev && m === "DELETE") return this.deleteDevice(me, dev[1]);
+      const agent = path.match(/^\/agents\/([^/]+)$/);
+      if (agent && m === "DELETE") return this.dismissAgent(me, decodeURIComponent(agent[1]));
 
       if (me.role !== "owner") return err(403, "Owner only");
 
@@ -331,6 +338,7 @@ export class Realm extends DurableObject<Env> {
   }
 
   private dropAgents(deviceId: string): void {
+    this.sql.exec("DELETE FROM dismissed_agents WHERE device_id = ?", deviceId);
     const agents = this.sql.exec("SELECT id FROM agents WHERE device_id = ?", deviceId).toArray();
     if (!agents.length) return;
     this.sql.exec("DELETE FROM agents WHERE device_id = ?", deviceId);
@@ -338,6 +346,17 @@ export class Realm extends DurableObject<Env> {
   }
 
   // ----------------------------------------------------------------- events
+
+  private dismissAgent(me: Member, id: string): Response {
+    const row = this.sql.exec("SELECT a.status, a.device_id, a.hero_name, a.name_category, d.member_id FROM agents a JOIN devices d ON d.id = a.device_id WHERE a.id = ?", id).toArray()[0];
+    if (!row) return err(404, "No such agent");
+    if (row.member_id !== me.id) return err(403, "You can remove only your own resting agents");
+    if (row.status !== "idle") return err(409, "Only resting agents can be removed");
+    this.sql.exec("INSERT OR REPLACE INTO dismissed_agents (id, device_id, removed, hero_name, name_category) VALUES (?, ?, ?, ?, ?)", id, row.device_id, Date.now(), row.hero_name, row.name_category);
+    this.sql.exec("DELETE FROM agents WHERE id = ?", id);
+    this.broadcast({ t: "gone", id });
+    return json({ ok: true });
+  }
 
   private async postEvent(req: Request): Promise<Response> {
     const token = bearer(req);
@@ -371,13 +390,18 @@ export class Realm extends DurableObject<Env> {
     }
 
     const id = `${device.id}:${ev.agent}:${ev.session}`;
+    const dismissed = this.sql.exec("SELECT id, hero_name, name_category FROM dismissed_agents WHERE id = ?", id).toArray()[0];
+    if (dismissed) {
+      if (ev.event === "working" || ev.event === "activity" || ev.event === "end") this.sql.exec("DELETE FROM dismissed_agents WHERE id = ?", id);
+      else return json({ ok: true });
+    }
     if (ev.event === "end") {
       this.sql.exec("DELETE FROM agents WHERE id = ?", id);
       this.broadcast({ t: "gone", id });
       return json({ ok: true });
     }
 
-    const prev = this.sql.exec("SELECT project, status, activity, since, kills FROM agents WHERE id = ?", id).toArray()[0];
+    const prev = this.sql.exec("SELECT project, status, activity, since, kills, hero_name, name_category FROM agents WHERE id = ?", id).toArray()[0] ?? dismissed;
     let status = (prev?.status as string) ?? "idle";
     let activity = (prev?.activity as string | null) ?? null;
     let since = (prev?.since as number) ?? now;
@@ -414,7 +438,11 @@ export class Realm extends DurableObject<Env> {
         since = now;
         break;
     }
-    const project = ev.project ?? (prev?.project as string) ?? "";
+    const requestedCategory = nameCategory(ev.project);
+    const category: NameCategory = requestedCategory ?? ((prev?.name_category as NameCategory) || "fantasy");
+    const project = requestedCategory ? NAME_CATEGORIES.find((c) => c.id === category)!.label : ev.project ?? (prev?.project as string) ?? "";
+    const used = new Set(this.sql.exec("SELECT hero_name FROM agents WHERE name_category = ? UNION SELECT hero_name FROM dismissed_agents WHERE name_category = ?", category, category).toArray().map((a) => a.hero_name as string));
+    const heroName = prev?.hero_name && prev.name_category === category ? prev.hero_name as string : randomAgentName(category, used);
 
     this.sql.exec(
       `INSERT INTO agents (id, device_id, agent, project, status, activity, since, last, kills) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -430,6 +458,7 @@ export class Realm extends DurableObject<Env> {
       now,
       kills,
     );
+    this.sql.exec("UPDATE agents SET hero_name = ?, name_category = ? WHERE id = ?", heroName, category, id);
     const agent = this.agents(id)[0];
     if (agent) this.broadcast({ t: "agent", agent, now });
     if ((await this.ctx.storage.getAlarm()) === null) await this.ctx.storage.setAlarm(now + ALARM_EVERY_MS);
@@ -437,7 +466,7 @@ export class Realm extends DurableObject<Env> {
   }
 
   private agents(id?: string): AgentState[] {
-    const q = `SELECT a.id, a.agent, d.name AS pc, d.id AS pcId, m.name AS owner, a.project, a.status, a.activity, a.since, a.last, a.kills
+    const q = `SELECT a.id, a.agent, d.name AS pc, d.id AS pcId, m.name AS owner, m.id AS ownerId, a.hero_name AS name, a.name_category AS nameCategory, a.project, a.status, a.activity, a.since, a.last, a.kills
                FROM agents a JOIN devices d ON d.id = a.device_id JOIN members m ON m.id = d.member_id`;
     const cur = id ? this.sql.exec(`${q} WHERE a.id = ?`, id) : this.sql.exec(`${q} ORDER BY a.since`);
     return cur.toArray() as unknown as AgentState[];
@@ -446,6 +475,7 @@ export class Realm extends DurableObject<Env> {
   /** Heroes whose PC went quiet fade to "stale", then leave. */
   async alarm(): Promise<void> {
     const now = Date.now();
+    this.sql.exec("DELETE FROM dismissed_agents WHERE removed < ?", now - DROP_IDLE_AFTER_MS);
     for (const a of this.agents()) {
       const quiet = now - a.last;
       const busy = a.status !== "idle";

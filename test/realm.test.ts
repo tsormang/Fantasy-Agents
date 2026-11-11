@@ -1,6 +1,7 @@
 import { SELF, env, runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
 import type { ServerMsg } from "../shared/protocol";
+import { NAME_CATEGORIES, randomAgentName } from "../shared/names";
 
 const BASE = "https://realm.test";
 
@@ -82,6 +83,72 @@ describe("auth", () => {
 });
 
 describe("events", () => {
+  it("assigns distinct names from every category and keeps names stable across events and viewers", async () => {
+    const m = await memberWithDevice("Names", "Name PC");
+    const stub = env.REALM.get(env.REALM.idFromName("realm"));
+    for (const category of NAME_CATEGORIES) {
+      const used = new Set<string>();
+      for (let i = 0; i < 25; i++) {
+        const name = randomAgentName(category.id, used);
+        expect(name.length).toBeGreaterThan(0);
+        expect(used.has(name)).toBe(false);
+        used.add(name);
+      }
+      const send = (session: string, event = "working", project: string | undefined = `@names:${category.id}`) => api("/events", { bearer: m.device.token, body: { v: 2, agent: "codex", session, event, project } });
+      const session = `names-${category.id}`;
+      expect((await send(session)).status).toBe(200);
+      const get = () => runInDurableObject(stub, (_o, state) => state.storage.sql.exec("SELECT hero_name, name_category FROM agents WHERE id = ?", `${m.device.deviceId}:codex:${session}`).one());
+      const before = await get();
+      expect(before.name_category).toBe(category.id);
+      expect(before.hero_name).toBeTruthy();
+      await send(session, "idle");
+      expect(await get()).toEqual(before);
+      await send(`${session}-second`);
+      const second = await runInDurableObject(stub, (_o, state) => state.storage.sql.exec("SELECT hero_name FROM agents WHERE id = ?", `${m.device.deviceId}:codex:${session}-second`).one());
+      expect(second.hero_name).not.toBe(before.hero_name);
+    }
+    const v = await watch("", m.cookie);
+    await tick();
+    const snapshot = v.msgs[0] as Extract<ServerMsg, { t: "snapshot" }>;
+    const hero = snapshot.agents.find((a) => a.id === `${m.device.deviceId}:codex:names-latin`)!;
+    expect(hero.nameCategory).toBe("latin");
+    const originalName = hero.name;
+    await api("/events", { bearer: m.device.token, body: { v: 2, agent: "codex", session: "names-latin", event: "activity", activity: "read" } });
+    await tick();
+    expect(v.msgs.at(-1)).toMatchObject({ t: "agent", agent: { name: originalName, nameCategory: "latin" } });
+    await api("/events", { bearer: m.device.token, body: { v: 2, agent: "codex", session: "names-latin", event: "working", project: "@names:korean" } });
+    await tick();
+    expect(v.msgs.at(-1)).toMatchObject({ t: "agent", agent: { nameCategory: "korean" } });
+    expect((v.msgs.at(-1) as Extract<ServerMsg, { t: "agent" }>).agent.name).not.toBe(originalName);
+    v.ws!.close();
+  });
+
+  it("allows only an agent's owner to dismiss it while resting, and restores it when work resumes", async () => {
+    const m = await memberWithDevice("Rest owner", "Rest PC");
+    const id = `${m.device.deviceId}:claude:rest`;
+    const endpoint = `/agents/${encodeURIComponent(id)}`;
+    const send = (event: string) => api("/events", { bearer: m.device.token, body: { v: 2, agent: "claude", session: "rest", event, project: "@names:gothic" } });
+    await send("working");
+    expect((await api(endpoint, { method: "DELETE" })).status).toBe(401);
+    expect((await api(endpoint, { cookie: m.own, method: "DELETE" })).status).toBe(403);
+    expect((await api(endpoint, { cookie: m.cookie, method: "DELETE" })).status).toBe(409);
+    await send("idle");
+    const v = await watch("", m.cookie);
+    await tick();
+    const before = (v.msgs[0] as Extract<ServerMsg, { t: "snapshot" }>).agents.find((a) => a.id === id)!.name;
+    expect((await api(endpoint, { cookie: m.cookie, method: "DELETE" })).status).toBe(200);
+    await tick();
+    expect(v.msgs.at(-1)).toEqual({ t: "gone", id });
+    const count = v.msgs.length;
+    await send("idle");
+    await send("start");
+    await tick();
+    expect(v.msgs.length).toBe(count);
+    await send("working");
+    await tick();
+    expect(v.msgs.at(-1)).toMatchObject({ t: "agent", agent: { id, status: "working", nameCategory: "gothic", name: before } });
+    v.ws!.close();
+  });
   it("rejects unknown devices and malformed events", async () => {
     const ev = { v: 2, agent: "claude", session: "s1", event: "working" };
     expect((await api("/events", { bearer: "bogus", body: ev })).status).toBe(401);
@@ -171,7 +238,7 @@ describe("privacy", () => {
     await tick();
     const snap = v.msgs[0] as Extract<ServerMsg, { t: "snapshot" }>;
     const hero = snap.agents.find((a) => a.id === `${m.device.deviceId}:cursor:spec`)!;
-    expect(Object.keys(hero).sort()).toEqual(["activity", "agent", "id", "kills", "last", "owner", "pc", "pcId", "project", "since", "status"]);
+    expect(Object.keys(hero).sort()).toEqual(["activity", "agent", "id", "kills", "last", "name", "nameCategory", "owner", "ownerId", "pc", "pcId", "project", "since", "status"]);
     expect(JSON.stringify(snap)).not.toMatch(/corp|rm -rf/);
     v.ws!.close();
 

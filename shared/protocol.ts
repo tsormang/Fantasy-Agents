@@ -34,6 +34,9 @@ export interface AgentState {
   pc: string;
   pcId: string;
   owner: string;
+  ownerId?: string;
+  name?: string;
+  nameCategory?: string;
   project: string;
   status: AgentStatus;
   activity: Activity | null;

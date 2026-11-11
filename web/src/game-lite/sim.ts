@@ -575,7 +575,7 @@ export class Sim {
 
   private drawLabel(g: CanvasRenderingContext2D, h: Hero): void {
     const top = Math.round(h.y - h.spr.h - 7);
-    const name = (h.a.project || h.a.pc).slice(0, 14);
+    const name = (h.a.name || h.a.project || h.a.pc).slice(0, 20);
     drawText(g, name, h.x, top, LABEL[h.a.status]);
     if (h.a.status === "waiting") {
       const bob = Math.sin(this.t * 5) > 0 ? 1 : 0;

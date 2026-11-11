@@ -56,6 +56,7 @@ async function main(): Promise<void> {
   if (path === "/admin") return adminPage(root, me);
 
   const store = new Store();
+  store.memberId = me.id;
   connect(store);
   const connectBtn = el("button", { textContent: "Connect PC" });
   connectBtn.onclick = () => void connectModal(root);

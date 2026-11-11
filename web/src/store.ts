@@ -2,6 +2,7 @@ import type { AgentState, ServerMsg } from "../../shared/protocol";
 
 /** Live agent state, fed either by the WebSocket or by the demo script. */
 export class Store {
+  memberId: string | null = null;
   agents = new Map<string, AgentState>();
   connected = false;
   denied = false;

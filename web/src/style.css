@@ -77,6 +77,7 @@ button:active {
 }
 button:focus-visible,
 input:focus-visible,
+select:focus-visible,
 a:focus-visible {
   outline: 2px solid #7fe3ff;
   outline-offset: 2px;
@@ -96,7 +97,8 @@ button.danger {
     inset 2px 2px 0 #f08a80;
 }
 
-input {
+input,
+select {
   font: inherit;
   color: var(--text);
   background: #15111b;
@@ -104,6 +106,18 @@ input {
   padding: 5px 8px;
   min-width: 0;
   width: 100%;
+}
+.agent-actions {
+  position: absolute;
+  bottom: 16px;
+  left: 16px;
+  width: 340px;
+  max-width: calc(100% - 32px);
+  max-height: 45%;
+  overflow-y: auto;
+}
+.agent-actions[hidden] {
+  display: none;
 }
 
 h1,
@@ -502,6 +516,7 @@ ul.list li span {
 }
 .ts-ui button:focus-visible,
 .ts-ui input:focus-visible,
+.ts-ui select:focus-visible,
 .ts-ui a:focus-visible {
   outline-color: var(--ink-teal);
 }
@@ -551,7 +566,8 @@ ul.list li span {
 }
 
 /* fields, commands and lists on paper */
-.ts-ui input {
+.ts-ui input,
+.ts-ui select {
   color: var(--ink-brown);
   background: #fffaf0;
   border-color: var(--paper-edge);

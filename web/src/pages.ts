@@ -1,5 +1,6 @@
 import { ago, api, copyButton, el } from "./dom";
 import { alternateModePath, lite, modePath } from "./mode";
+import { NAME_CATEGORIES, categoryAlias, nameCategory } from "../../shared/names";
 
 export interface Member {
   id: string;
@@ -186,9 +187,9 @@ function projectFields(edit = false): HTMLElement {
   const copy = copyButton(() => command.textContent || "");
   const output = el("div", { class: "row project-command" }, command, copy);
   const hint = el("p", { class: "dim", textContent: "Enter a project path above to generate your command." });
-  const inputs: { path: HTMLInputElement; name: HTMLInputElement; previous: HTMLInputElement }[] = [];
+  const inputs: { path: HTMLInputElement; category: HTMLSelectElement; previous: HTMLInputElement }[] = [];
   const update = () => {
-    const projects = inputs.map((input) => ({ path: input.path.value || (edit ? input.previous.value : ""), name: input.name.value.trim(), ...(edit ? { previousPath: input.previous.value } : {}) })).filter((p) => p.path.trim());
+    const projects = inputs.map((input) => ({ path: input.path.value || (edit ? input.previous.value : ""), name: categoryAlias(input.category.value), ...(edit ? { previousPath: input.previous.value } : {}) })).filter((p) => p.path.trim());
     command.textContent = projects.length ? (edit ? editProjectsCommand(projects) : projectsCommand(projects)) : "";
     output.hidden = !projects.length;
     hint.hidden = !!projects.length;
@@ -196,19 +197,19 @@ function projectFields(edit = false): HTMLElement {
   const addField = (focus = true, project?: { path: string; name?: string }) => {
     const input = el("input", { type: "text", placeholder: "C:\\Projects\\MyApp or /home/you/projects/my-app", autocomplete: "off", spellcheck: false });
     const previous = el("input", { type: "text", placeholder: "Current allowed folder path", autocomplete: "off", spellcheck: false, value: project?.path || "" });
-    const name = el("input", { type: "text", placeholder: "e.g. Lemnos", maxLength: 40, autocomplete: "off", spellcheck: false });
-    name.value = project?.name || "";
+    const category = el("select", {}, ...NAME_CATEGORIES.map((c) => el("option", { value: c.id, textContent: c.label })));
+    category.value = nameCategory(project?.name) || "fantasy";
     const label = el("span", { textContent: `Project path ${inputs.length + 1}` });
     const remove = el("button", { class: "quiet", type: "button", textContent: "Remove" });
     const row = el("div", { class: "project-path" },
       el("div", { class: "project-details" },
         ...(edit ? [el("label", {}, label, previous)] : []),
         el("label", {}, edit ? el("span", { textContent: "New path (optional; blank keeps current path)" }) : label, input),
-        el("label", {}, el("span", { textContent: "Project name (optional)" }), name)), remove);
-    const entry = { path: input, name, previous };
+        el("label", {}, el("span", { textContent: "Agent name category" }), category)), remove);
+    const entry = { path: input, category, previous };
     inputs.push(entry);
     input.oninput = update;
-    name.oninput = update;
+    category.onchange = update;
     previous.oninput = update;
     remove.onclick = () => {
       inputs.splice(inputs.indexOf(entry), 1);
@@ -243,20 +244,20 @@ function projectFields(edit = false): HTMLElement {
       } catch (x) { error.textContent = (x as Error).message; }
     };
     importBox.append(
-      el("p", { textContent: "Enter an existing path below, or load project paths and names from this PC's connector settings." }),
+      el("p", { textContent: "Enter an existing path below, or load project settings from this PC's connector file." }),
       el("label", {}, el("span", { textContent: "Load settings: .fantasy-agents/config.json in your home folder" }), file),
-      el("p", { class: "dim", textContent: "The file is read only in this browser. Only project paths and names are used; the device token is never uploaded or saved." }), error,
+      el("p", { class: "dim", textContent: "The file is read only in this browser. Only project settings are used; the device token is never uploaded or saved. Older custom names default to Fantasy." }), error,
     );
   }
   return el("div", { class: "project-setup" },
-    el("p", { textContent: edit ? "Edit the allowed folders and project names on your PC. These settings apply to every agent tool using that folder." : "Choose the project folders agents can report from on this PC. Subfolders and git worktrees are included." }),
+    el("p", { textContent: edit ? "Edit the allowed folders and name categories on your PC. These settings apply to every agent tool using that folder." : "Choose the project folders agents can report from on this PC. Subfolders and git worktrees are included." }),
     importBox,
-    el("p", { class: "dim", textContent: "Give each path a project name for viewers to see, or leave it blank to use the folder name." }),
+    el("p", { class: "dim", textContent: "Choose a name category for each path. Each agent gets its own random name, kept throughout its session. Changing category assigns a new name on its next update." }),
     fields, el("p", {}, add), hint,
     el("p", { textContent: "Copy and run the generated command in a terminal on this PC, then start a new agent session in an allowed folder and send a prompt." }),
     output,
     ...(edit ? [el("p", { class: "dim", textContent: "Changing a path allows the new folder and removes the old allowance. Other allowed folders stay as they are. Remove only removes a row from this command. Run the command on the selected PC to apply your edits." })] : []),
-    el("p", { class: "dim", textContent: "Paths stay in this dialog and are never sent to the server. Running the command saves the allowed folders and names on your PC; viewers see the project name (or folder name if blank). Adding a field here does not allow the folder until you run the command." }),
+    el("p", { class: "dim", textContent: "Paths stay in this dialog and are never sent to the server. Running the command saves allowed folders and name categories on your PC. Viewers see each agent's assigned name. Adding a field here does not allow the folder until you run the command." }),
   );
 }
 

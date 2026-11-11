@@ -10,10 +10,12 @@ const compile = (file) => ts.transpileModule(readFileSync(new URL(file, import.m
 }).outputText;
 const pagesCode = compile("../web/src/pages.ts");
 const domCode = compile("../web/src/dom.ts");
+const namesContext = vm.createContext({ exports: {} });
+vm.runInContext(compile("../shared/names.ts"), namesContext);
 
 function loadPages(extra = {}, dom = {}) {
   const context = vm.createContext({ exports: {}, TextEncoder, btoa, ...extra,
-    require: (name) => name === "./dom" ? dom : {},
+    require: (name) => name === "./dom" ? dom : name === "../../shared/names" ? namesContext.exports : {},
   });
   vm.runInContext(pagesCode, context);
   return context.exports;
@@ -91,6 +93,8 @@ class Element {
   children = [];
   value = "";
   textContent = "";
+  classList = { toggle() {} };
+  style = { setProperty() {} };
   append(...nodes) { for (const node of nodes) { node.remove?.(); this.children.push(node); node.parent = this; } }
   replaceChildren(...nodes) { this.children.forEach((node) => { node.parent = null; }); this.children = []; this.append(...nodes); }
   remove() { if (this.parent) this.parent.children.splice(this.parent.children.indexOf(this), 1); this.parent = null; }
@@ -122,33 +126,74 @@ test("project fields generate multiple paths and survive status polling and PC s
   const first = root.querySelector("input");
   first.value = "C:\\Projects\\First";
   first.oninput();
-  const firstName = root.all().filter((node) => node.tag === "input")[1];
-  firstName.value = "First project";
-  firstName.oninput();
+  const firstCategory = root.querySelector("select");
+  firstCategory.value = "latin";
+  firstCategory.onchange();
   find("+ Add project path").onclick();
-  const second = root.all().filter((node) => node.tag === "input")[2];
+  const second = root.all().filter((node) => node.tag === "input")[1];
   second.value = "/projects/second";
   second.oninput();
   const command = () => root.all().find((node) => node.className === "cmd grow" && node.textContent.startsWith('node -e "const f='));
   assert.deepEqual(runCommand(command().textContent).map((call) => call.args[2]), [first.value, second.value]);
-  assert.deepEqual(runCommand(command().textContent).map((call) => call.args.slice(3)), [["--as", "First project"], []]);
+  assert.deepEqual(runCommand(command().textContent).map((call) => call.args.slice(3)), [["--as", "@names:latin"], ["--as", "@names:fantasy"]]);
   poll();
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(root.querySelector("input"), first);
   assert.equal(first.value, "C:\\Projects\\First");
-  assert.equal(firstName.value, "First project");
+  assert.equal(firstCategory.value, "latin");
   root.all().filter((node) => node.textContent === "Test")[1].onclick();
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(root.querySelector("input").value, "");
   find("Test").onclick();
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(root.querySelector("input"), first);
-  firstName.value = "";
-  firstName.oninput();
-  assert.deepEqual(runCommand(command().textContent).map((call) => call.args.slice(3)), [[], []]);
+  firstCategory.value = "korean";
+  firstCategory.onchange();
+  assert.deepEqual(runCommand(command().textContent).map((call) => call.args.slice(3)), [["--as", "@names:korean"], ["--as", "@names:fantasy"]]);
   find("Remove").onclick();
   assert.deepEqual(runCommand(command().textContent).map((call) => call.args[2]), [second.value]);
   assert.ok(requests.every(([url]) => url === "/devices"), "Paths must not be submitted to the server");
+});
+
+test("selecting your resting hero offers removal, while working, foreign and spectator heroes do not", async () => {
+  const document = { createElement: (tag) => Object.assign(new Element(), { tag }) };
+  const domContext = vm.createContext({ exports: {}, document });
+  vm.runInContext(domCode, domContext);
+  const requests = [];
+  const context = vm.createContext({ exports: {}, window: { innerWidth: 1000 }, setInterval() {},
+    require: (name) => ({
+      "./dom": { ...domContext.exports, api: async (...args) => { requests.push(args); return { ok: true }; } },
+      "./game/describe": { describe: () => "Resting" },
+      "./resize": { observeSize() {} },
+    })[name],
+  });
+  vm.runInContext(compile("../web/src/hud.ts"), context);
+  const base = { agent: "codex", pc: "My PC", owner: "Member", ownerId: "me", status: "idle", since: 0, name: "Aurelius" };
+  const agents = [
+    { ...base, id: "my:rest" },
+    { ...base, id: "my:work", status: "working" },
+    { ...base, id: "their:rest", ownerId: "someone-else" },
+  ];
+  const store = { memberId: "me", agents: new Map(agents.map((a) => [a.id, a])), now: () => 1000, onChange() {}, emit() {} };
+  const game = { select() {} };
+  const root = new Element();
+  new context.exports.Hud(root, store, game, { portrait: () => new Element(), classLabel: () => "Mage" });
+  const panel = root.all().find((node) => node.className === "agent-actions box");
+  game.onSelect("my:work");
+  assert.equal(panel.hidden, true);
+  game.onSelect("their:rest");
+  assert.equal(panel.hidden, true);
+  store.memberId = null;
+  game.onSelect("my:rest");
+  assert.equal(panel.hidden, true);
+  store.memberId = "me";
+  game.onSelect("my:rest");
+  assert.equal(panel.hidden, false);
+  const remove = panel.all().find((node) => node.textContent === "Remove resting agent");
+  await remove.onclick();
+  assert.deepEqual(requests, [["/agents/my%3Arest", "DELETE"]]);
+  assert.equal(store.agents.has("my:rest"), false);
+  assert.equal(panel.hidden, true);
 });
 
 test("Edit tab lists only owned PCs and imports paths locally without uploading credentials", async () => {
@@ -176,18 +221,20 @@ test("Edit tab lists only owned PCs and imports paths locally without uploading 
   await file.onchange();
   const editPanel = root.all().find((node) => node.textContent === "Edit your agents").parent;
   const inputs = editPanel.all().filter((node) => node.type === "text");
-  assert.deepEqual(inputs.map((node) => node.value), ["/old", "", "Old name"]);
+  assert.deepEqual(inputs.map((node) => node.value), ["/old", ""]);
+  const category = editPanel.querySelector("select");
+  assert.equal(category.value, "fantasy");
   inputs[1].value = "/new";
-  inputs[2].value = "New name";
-  inputs[2].oninput();
+  category.value = "ancient-greek";
+  category.onchange();
   const command = editPanel.all().find((node) => node.tag === "code").textContent;
-  assert.deepEqual(runCommand(command).map((call) => call.args.slice(1)), [["allow", "/new", "--as", "New name"], ["disallow", "/old"]]);
+  assert.deepEqual(runCommand(command).map((call) => call.args.slice(1)), [["allow", "/new", "--as", "@names:ancient-greek"], ["disallow", "/old"]]);
   assert.ok(!command.includes("never-upload-this"));
   find("Connect").onclick();
   find("Edit").onclick();
   poll();
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(editPanel.all().find((node) => node.type === "text"), inputs[0]);
-  assert.equal(inputs[2].value, "New name");
+  assert.equal(category.value, "ancient-greek");
   assert.ok(requests.every(([url, method, body]) => url === "/devices" && !method && !body));
 });

@@ -1,5 +1,5 @@
 import type { AgentState } from "../../shared/protocol";
-import { ago, el } from "./dom";
+import { ago, api, el } from "./dom";
 import { describe } from "./game/describe";
 import type { Store } from "./store";
 import { observeSize } from "./resize";
@@ -21,6 +21,9 @@ export class Hud {
   private stats: HTMLElement;
   private dot: HTMLElement;
   private selected: string | null = null;
+  private selectionPanel: HTMLElement;
+  private removing = false;
+  private removeError = "";
 
   constructor(
     root: HTMLElement,
@@ -46,13 +49,15 @@ export class Hud {
       ...actions,
       toggle,
     );
-    root.append(bar, this.roster);
+    this.selectionPanel = el("div", { class: "agent-actions box", hidden: true });
+    root.append(bar, this.roster, this.selectionPanel);
     // The bar wraps onto a second row on narrow screens, so the roster hangs below wherever it ends.
     const place = () => root.style.setProperty("--hud-top", `${bar.offsetTop + bar.offsetHeight}px`);
     observeSize(bar, place);
     place();
     game.onSelect = (id) => {
       this.selected = id;
+      this.removeError = "";
       // on phones the roster would cover the hero's speech bubble, so it stays as it was
       if (id && window.innerWidth >= 700) this.roster.hidden = false;
       this.render();
@@ -80,16 +85,17 @@ export class Hud {
         "button",
         { class: `hero${a.id === this.selected ? " sel" : ""}` },
         icon,
-        el("span", { class: "name", textContent: `${a.project || "unknown"} @ ${a.pc}` }),
+        el("span", { class: "name", textContent: `${a.name || a.project || "unknown"} @ ${a.pc}` }),
         el("span", { class: "time", textContent: ago(now - a.since) }),
         el("span", {
           class: `what ${a.status}`,
           textContent: `${this.appearance.classLabel(a)} (${a.agent}) - ${describe(a)}${a.status === "working" && a.kills ? ` - ${a.kills} slain` : ""}`,
         }),
       );
-      row.title = `Owner: ${a.owner}`;
+      row.title = `Owner: ${a.owner} · ${a.project}`;
       row.onclick = () => {
         this.selected = this.selected === a.id ? null : a.id;
+        this.removeError = "";
         this.game.select(this.selected);
         this.render();
       };
@@ -98,5 +104,31 @@ export class Hud {
     this.roster.replaceChildren(
       ...(rows.length ? rows : [el("div", { class: "empty", textContent: "The village is quiet. Connect a PC to summon heroes." })]),
     );
+    const selected = this.selected ? this.store.agents.get(this.selected) : undefined;
+    const canRemove = !!selected && selected.status === "idle" && !!this.store.memberId && selected.ownerId === this.store.memberId;
+    this.selectionPanel.hidden = !canRemove;
+    if (canRemove && selected) {
+      const remove = el("button", { class: "danger", textContent: this.removing ? "Removing..." : "Remove resting agent", disabled: this.removing });
+      remove.onclick = async () => {
+        if (this.removing) return;
+        this.removing = true;
+        this.removeError = "";
+        this.render();
+        try {
+          await api(`/agents/${encodeURIComponent(selected.id)}`, "DELETE");
+          this.store.agents.delete(selected.id);
+          this.selected = null;
+          this.game.select(null);
+          this.store.emit();
+        } catch (error) { this.removeError = (error as Error).message; }
+        finally { this.removing = false; this.render(); }
+      };
+      this.selectionPanel.replaceChildren(
+        el("p", {}, el("b", { textContent: selected.name || selected.project || selected.pc })),
+        el("p", { class: "dim", textContent: "Resting in the village. If this session starts working again, its hero returns." }),
+        remove,
+        ...(this.removeError ? [el("p", { class: "err", textContent: this.removeError })] : []),
+      );
+    }
   }
 }

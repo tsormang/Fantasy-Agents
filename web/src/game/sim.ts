@@ -718,7 +718,7 @@ export class Sim {
   }
 
   private drawLabel(g: CanvasRenderingContext2D, h: Hero, snap: (v: number) => number): void {
-    const name = (h.a.project || h.a.pc).slice(0, 14);
+    const name = (h.a.name || h.a.project || h.a.pc).slice(0, 20);
     const ribbons = img("ui_ribbons_small");
     let top = h.y - h.spr.h - 9;
     if (!loaded(ribbons)) {
