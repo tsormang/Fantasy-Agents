@@ -155,9 +155,15 @@ a {
   align-items: flex-end;
   margin-bottom: 10px;
 }
-.project-path label {
+.project-details {
   flex: 1;
   min-width: 0;
+}
+.project-path label {
+  display: block;
+}
+.project-path label + label {
+  margin-top: 6px;
 }
 .project-path label span {
   display: block;
@@ -177,7 +183,7 @@ a {
   .project-command {
     flex-wrap: wrap;
   }
-  .project-path label,
+  .project-details,
   .project-command > .grow {
     flex-basis: 100%;
   }

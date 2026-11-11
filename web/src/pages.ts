@@ -167,10 +167,10 @@ export function updateCommand(base: string): string {
   );
 }
 
-/** Encode paths as data so shell metacharacters, quotes and Unicode survive every supported shell. */
-export function projectsCommand(paths: string[]): string {
-  const encoded = btoa(Array.from(new TextEncoder().encode(JSON.stringify(paths)), (b) => String.fromCharCode(b)).join(""));
-  return `node -e "const f=require('path').join(require('os').homedir(),'.fantasy-agents','fa.mjs');const paths=JSON.parse(Buffer.from('${encoded}','base64').toString('utf8'));for(const p of paths){const r=require('child_process').spawnSync(process.execPath,[f,'allow',p],{stdio:'inherit'});if(r.error||r.status!==0)process.exit(r.status||1)}"`;
+/** Encode paths and names as data so shell metacharacters, quotes and Unicode survive every supported shell. */
+export function projectsCommand(projects: { path: string; name?: string }[]): string {
+  const encoded = btoa(Array.from(new TextEncoder().encode(JSON.stringify(projects)), (b) => String.fromCharCode(b)).join(""));
+  return `node -e "const f=require('path').join(require('os').homedir(),'.fantasy-agents','fa.mjs');const projects=JSON.parse(Buffer.from('${encoded}','base64').toString('utf8'));for(const p of projects){const args=[f,'allow',p.path];if(p.name)args.push('--as',p.name);const r=require('child_process').spawnSync(process.execPath,args,{stdio:'inherit'});if(r.error||r.status!==0)process.exit(r.status||1)}"`;
 }
 
 function projectFields(): HTMLElement {
@@ -179,22 +179,28 @@ function projectFields(): HTMLElement {
   const copy = copyButton(() => command.textContent || "");
   const output = el("div", { class: "row project-command" }, command, copy);
   const hint = el("p", { class: "dim", textContent: "Enter a project path above to generate your command." });
-  const inputs: HTMLInputElement[] = [];
+  const inputs: { path: HTMLInputElement; name: HTMLInputElement }[] = [];
   const update = () => {
-    const paths = [...new Set(inputs.map((input) => input.value).filter((path) => path.trim()))];
-    command.textContent = paths.length ? projectsCommand(paths) : "";
-    output.hidden = !paths.length;
-    hint.hidden = !!paths.length;
+    const projects = inputs.filter((input) => input.path.value.trim()).map((input) => ({ path: input.path.value, name: input.name.value.trim() }));
+    command.textContent = projects.length ? projectsCommand(projects) : "";
+    output.hidden = !projects.length;
+    hint.hidden = !!projects.length;
   };
   const addField = (focus = true) => {
     const input = el("input", { type: "text", placeholder: "C:\\Projects\\MyApp or /home/you/projects/my-app", autocomplete: "off", spellcheck: false });
+    const name = el("input", { type: "text", placeholder: "e.g. Lemnos", maxLength: 40, autocomplete: "off", spellcheck: false });
     const label = el("span", { textContent: `Project path ${inputs.length + 1}` });
     const remove = el("button", { class: "quiet", type: "button", textContent: "Remove" });
-    const row = el("div", { class: "project-path" }, el("label", { class: "grow" }, label, input), remove);
-    inputs.push(input);
+    const row = el("div", { class: "project-path" },
+      el("div", { class: "project-details" },
+        el("label", {}, label, input),
+        el("label", {}, el("span", { textContent: "Project name (optional)" }), name)), remove);
+    const entry = { path: input, name };
+    inputs.push(entry);
     input.oninput = update;
+    name.oninput = update;
     remove.onclick = () => {
-      inputs.splice(inputs.indexOf(input), 1);
+      inputs.splice(inputs.indexOf(entry), 1);
       row.remove();
       Array.from(fields.children).forEach((child, i) => { child.querySelector("span")!.textContent = `Project path ${i + 1}`; });
       if (!inputs.length) addField();
@@ -209,10 +215,11 @@ function projectFields(): HTMLElement {
   update();
   return el("div", { class: "project-setup" },
     el("p", { textContent: "Choose the project folders agents can report from on this PC. Subfolders and git worktrees are included." }),
+    el("p", { class: "dim", textContent: "Give each path a project name for viewers to see, or leave it blank to use the folder name." }),
     fields, el("p", {}, add), hint,
     el("p", { textContent: "Copy and run the generated command in a terminal on this PC, then start a new agent session in an allowed folder and send a prompt." }),
     output,
-    el("p", { class: "dim", textContent: "Paths stay in this dialog and are never sent to the server. Running the command saves the allowed folders on your PC; viewers see only the folder name. Adding a field here does not allow the folder until you run the command." }),
+    el("p", { class: "dim", textContent: "Paths stay in this dialog and are never sent to the server. Running the command saves the allowed folders and names on your PC; viewers see the project name (or folder name if blank). Adding a field here does not allow the folder until you run the command." }),
   );
 }
 
