@@ -136,6 +136,30 @@ describe("events", () => {
   });
 });
 
+describe("setup checklist", () => {
+  it("tracks which agents have hooks installed and which have reported in", async () => {
+    const own = await owner();
+    const pair = await api("/pair", { cookie: own, method: "POST" });
+    const dev = await api("/connect", { body: { code: pair.data.code, pc: "Check-PC", agents: ["claude", "codex", "hal"] } });
+    const mine = async () => (await api("/devices", { cookie: own })).data.devices.find((d: any) => d.id === dev.data.deviceId);
+
+    expect((await mine()).agents).toEqual([
+      { agent: "claude", seen: null },
+      { agent: "codex", seen: null },
+    ]);
+    expect((await api("/ping", { bearer: dev.data.token, method: "POST" })).data).toMatchObject({ ok: true, pc: "Check-PC" });
+    expect((await api("/ping", { bearer: "bogus", method: "POST" })).status).toBe(401);
+
+    await api("/events", { bearer: dev.data.token, body: { v: 1, agent: "codex", session: "t", event: "working" } });
+    // an agent the connector did not report still shows up once it sends events
+    await api("/events", { bearer: dev.data.token, body: { v: 1, agent: "cursor", session: "t", event: "working" } });
+    const agents = (await mine()).agents as { agent: string; seen: number | null }[];
+    expect(agents.find((a) => a.agent === "claude")!.seen).toBeNull();
+    expect(agents.find((a) => a.agent === "codex")!.seen).toBeGreaterThan(0);
+    expect(agents.find((a) => a.agent === "cursor")!.seen).toBeGreaterThan(0);
+  });
+});
+
 describe("revocation", () => {
   it("a revoked device can no longer post", async () => {
     const m = await memberWithDevice();

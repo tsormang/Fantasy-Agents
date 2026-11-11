@@ -98,7 +98,7 @@ export const AGENTS = {
     file: path.join(HOME, ".codex", "hooks.json"),
     events: ["SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse", "PermissionRequest", "SubagentStart", "Stop", "SessionEnd"],
     entry: (cmd) => ({ hooks: [{ type: "command", command: cmd, timeout: 5 }] }),
-    note: "Codex asks you to review and trust new hooks the next time it starts.",
+    note: "Codex skips new hooks until you trust them: Settings > Hooks in the desktop app, or /hooks in the CLI",
   },
   cursor: {
     label: "Cursor",
@@ -226,7 +226,7 @@ async function connect(argv) {
   const res = await fetch(`${url}/api/connect`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ code, pc }),
+    body: JSON.stringify({ code, pc, agents: targets }),
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) return console.log(`Could not connect: ${data.error || res.status}`);
@@ -239,7 +239,9 @@ async function connect(argv) {
   for (const a of targets) {
     if (writeHooks(a, (c) => addHooks(c, a))) console.log(`  ok: ${AGENTS[a].label}${AGENTS[a].note ? ` (${AGENTS[a].note})` : ""}`);
   }
-  console.log(`\nConnected. New agent sessions on this PC will appear in the village.`);
+  console.log(`\nConnected. Server check: ${await ping()}`);
+  console.log("Now go back to the web page: it shows a checklist to test each agent.");
+  console.log("Start a NEW session in each tool and send any prompt; running sessions do not pick up hooks.");
   console.log(`To undo everything: node "${SCRIPT}" disconnect\n`);
 }
 
@@ -254,9 +256,22 @@ async function disconnect(argv) {
   console.log(`You can now delete ${DIR}`);
 }
 
-function status() {
+async function ping() {
+  const cfg = loadConfig();
+  if (!cfg) return "not connected";
+  try {
+    const res = await fetch(`${cfg.url}/api/ping`, { method: "POST", headers: { Authorization: `Bearer ${cfg.token}` }, signal: AbortSignal.timeout(5000) });
+    if (res.ok) return "ok";
+    return res.status === 401 ? "this PC was revoked on the server; run connect again" : `server answered ${res.status}`;
+  } catch {
+    return "could not reach the server (offline, proxy or firewall?)";
+  }
+}
+
+async function status() {
   const cfg = loadConfig();
   console.log(cfg ? `Connected as "${cfg.pc}" to ${cfg.url}` : "Not connected.");
+  if (cfg) console.log(`  Server check: ${await ping()}`);
   for (const a of Object.keys(AGENTS)) {
     const spec = AGENTS[a];
     console.log(`  ${spec.label}: ${!fs.existsSync(spec.dir) ? "not installed" : installed(a) ? "hooks installed" : "no hooks"}`);
@@ -324,6 +339,6 @@ if (isMain) {
     process.exit(0);
   } else if (cmd === "connect") await connect(rest);
   else if (cmd === "disconnect") await disconnect(rest);
-  else if (cmd === "status") status();
+  else if (cmd === "status") await status();
   else console.log("Fantasy Agents connector\n  node fa.mjs connect <url> <pairing-code>\n  node fa.mjs status\n  node fa.mjs disconnect");
 }

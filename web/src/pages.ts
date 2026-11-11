@@ -1,4 +1,4 @@
-import { api, copyButton, el } from "./dom";
+import { ago, api, copyButton, el } from "./dom";
 
 export interface Member {
   id: string;
@@ -92,28 +92,124 @@ export function joinPage(root: HTMLElement, code: string): void {
 
 // ------------------------------------------------------- connect a PC modal
 
+const TOOLS: { agent: string; label: string; steps: string[] }[] = [
+  {
+    agent: "claude",
+    label: "Claude Code",
+    steps: [
+      "Start a NEW Claude Code session and send any prompt. Sessions that were already open do not load new hooks.",
+      "Still nothing? Type /hooks in Claude Code and check that the fa.mjs entries are listed. Approve them if it asks you to review hook changes.",
+    ],
+  },
+  {
+    agent: "codex",
+    label: "Codex",
+    steps: [
+      'Codex skips new hooks until you trust them. Desktop app: Settings > Hooks, or "Review hooks" in the composer. CLI: type /hooks.',
+      "Trust the entries that run fa.mjs, then start a NEW chat and send any prompt.",
+    ],
+  },
+  {
+    agent: "cursor",
+    label: "Cursor",
+    steps: [
+      "Open a NEW Agent chat and send any prompt. Tab completions and inline edits do not count.",
+      'Still nothing? Check Settings > Hooks and the "Hooks" output channel for errors, and update Cursor if no hooks are listed.',
+    ],
+  },
+];
+
+interface Device {
+  id: string;
+  name: string;
+  owner: string;
+  created: number;
+  agents: { agent: string; seen: number | null }[];
+}
+
 export async function connectModal(root: HTMLElement): Promise<void> {
   const body = el("div", {});
   const close = el("button", { class: "quiet", textContent: "Close" });
   const modal = el("div", { class: "modal" }, el("div", { class: "box" }, el("h1", { textContent: "Connect a PC" }), body, close));
-  close.onclick = () => modal.remove();
+  let timer = 0;
+  close.onclick = () => {
+    clearInterval(timer);
+    modal.remove();
+  };
   root.append(modal);
 
-  const devices = el("ul", { class: "list" });
-  const loadDevices = async () => {
-    const { devices: list } = await api<{ devices: any[] }>("/devices");
-    devices.replaceChildren(
+  const devicesEl = el("ul", { class: "list" });
+  const checklist = el("div", {});
+  let known: Set<string> | null = null;
+  /** Which PC is being tested, and from what moment an event counts as a pass. */
+  let testing: { id: string; since: number } | null = null;
+
+  const renderChecklist = (list: Device[], now: number) => {
+    const t0 = testing;
+    const d = t0 && list.find((x) => x.id === t0.id);
+    if (!t0 || !d) return checklist.replaceChildren();
+    const passedFor = (agent: string) => {
+      const e = d.agents.find((a) => a.agent === agent);
+      return !!e?.seen && e.seen >= t0.since;
+    };
+    const rows = TOOLS.map((t) => {
+      const entry = d.agents.find((a) => a.agent === t.agent);
+      const passed = passedFor(t.agent);
+      const state = !entry ? "Not set up on this PC" : passed ? "OK - hero summoned" : "Waiting for a prompt...";
+      const item = el(
+        "div",
+        { class: `check ${passed ? "ok" : entry ? "wait" : "off"}` },
+        el("div", { class: "row" }, el("b", { class: "grow", textContent: t.label }), el("span", { class: "state", textContent: state })),
+      );
+      if (!entry) {
+        item.append(el("p", { class: "dim", textContent: "The connector did not find this tool here. If you install it later, run the two commands again." }));
+      } else if (!passed) {
+        if (entry.seen) item.append(el("p", { class: "dim", textContent: `Last heard from it ${ago(now - entry.seen)} ago. Send a prompt to test again.` }));
+        item.append(el("ol", {}, ...t.steps.map((s) => el("li", { textContent: s }))));
+      }
+      return item;
+    });
+    const done = TOOLS.every((t) => !d.agents.some((a) => a.agent === t.agent) || passedFor(t.agent));
+    checklist.replaceChildren(
+      el("h2", { textContent: `Test "${d.name}"` }),
+      el("p", {
+        textContent: done
+          ? "Everything that is set up on this PC is reporting in. You can close this."
+          : "In each tool below, start a new session and send any prompt. This list updates by itself.",
+      }),
+      ...rows,
+      el("p", { class: "dim", textContent: "If nothing arrives at all, run this on that PC to check it can reach the server:" }),
+      el("code", { class: "cmd", textContent: "node ~/.fantasy-agents/fa.mjs status" }),
+    );
+  };
+
+  const refresh = async () => {
+    const { devices: list, now } = await api<{ devices: Device[]; now: number }>("/devices");
+    if (!known) known = new Set(list.map((d) => d.id));
+    // A PC that appears while this dialog is open was just paired: start testing it.
+    const fresh = list.find((d) => !known!.has(d.id));
+    if (fresh) {
+      known.add(fresh.id);
+      testing = { id: fresh.id, since: 0 };
+    }
+    devicesEl.replaceChildren(
       ...list.map((d) => {
+        const test = el("button", { class: "quiet", textContent: testing?.id === d.id ? "Testing" : "Test" });
+        test.onclick = () => {
+          testing = { id: d.id, since: now };
+          void refresh();
+        };
         const rm = el("button", { class: "danger", textContent: "Revoke" });
         rm.onclick = async () => {
           if (!confirm(`Revoke "${d.name}"? Its agents will stop appearing.`)) return;
           await api(`/devices/${d.id}`, "DELETE");
-          void loadDevices();
+          void refresh();
         };
-        return el("li", {}, el("span", { textContent: `${d.name} (${d.owner})` }), rm);
+        return el("li", {}, el("span", { textContent: `${d.name} (${d.owner})` }), test, rm);
       }),
     );
-    if (!list.length) devices.append(el("li", { class: "dim" }, el("span", { textContent: "No PCs connected yet." })));
+    if (!list.length) devicesEl.append(el("li", { class: "dim" }, el("span", { textContent: "No PCs connected yet." })));
+    renderChecklist(list, now);
   };
 
   try {
@@ -121,7 +217,8 @@ export async function connectModal(root: HTMLElement): Promise<void> {
     const get = `node -e "fetch('${origin()}/fa.mjs').then(r=>r.text()).then(s=>require('fs').writeFileSync('fa.mjs',s))"`;
     const run = `node fa.mjs connect ${origin()} ${code}`;
     body.append(
-      el("p", { textContent: "On the PC you want to connect, run these two commands in a terminal (needs Node 18 or newer):" }),
+      el("h2", { textContent: "1. Run on the PC" }),
+      el("p", { textContent: "In a terminal on the PC you want to connect (needs Node 18 or newer):" }),
       el("div", { class: "row" }, el("code", { class: "cmd grow", textContent: get }), copyButton(() => get)),
       el("div", { class: "row" }, el("code", { class: "cmd grow", textContent: run }), copyButton(() => run)),
       el("p", {
@@ -129,10 +226,13 @@ export async function connectModal(root: HTMLElement): Promise<void> {
         textContent:
           "The code works once and expires in 10 minutes. The connector shows which hook files it will change and asks before writing. It only ever sends: agent type, project folder name and activity kind.",
       }),
-      el("h2", { textContent: "Connected PCs" }),
-      devices,
+      el("h2", { textContent: "2. Test the agents" }),
+      el("p", { class: "dim", textContent: "A newly connected PC shows up here by itself. Press Test on any PC to check it again." }),
+      devicesEl,
+      checklist,
     );
-    await loadDevices();
+    await refresh();
+    timer = window.setInterval(() => void refresh().catch(() => {}), 3000);
   } catch (x) {
     body.append(el("p", { class: "err", textContent: (x as Error).message }));
   }

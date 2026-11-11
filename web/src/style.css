@@ -312,3 +312,38 @@ ul.list li span {
     scroll-behavior: auto;
   }
 }
+
+/* ------------------------------------------------------ setup checklist */
+
+.check {
+  border: 2px solid var(--edge);
+  border-left-width: 6px;
+  padding: 6px 8px;
+  margin: 0 0 6px;
+  background: #221b2b;
+}
+.check.ok {
+  border-color: var(--green);
+}
+.check.ok .state {
+  color: var(--green);
+}
+.check.wait {
+  border-color: var(--gold);
+}
+.check.wait .state {
+  color: var(--gold);
+}
+.check.off .state {
+  color: var(--dim);
+}
+.check p {
+  margin: 4px 0 0;
+}
+.check ol {
+  margin: 4px 0 0;
+  padding-left: 20px;
+}
+.check li {
+  margin-bottom: 3px;
+}

@@ -2,6 +2,7 @@ import { DurableObject } from "cloudflare:workers";
 import {
   type AgentState,
   type ServerMsg,
+  AGENT_KINDS,
   DROP_BUSY_AFTER_MS,
   DROP_IDLE_AFTER_MS,
   STALE_AFTER_MS,
@@ -53,6 +54,7 @@ export class Realm extends DurableObject<Env> {
       CREATE TABLE IF NOT EXISTS pairings (hash TEXT PRIMARY KEY, member_id TEXT NOT NULL, expires INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS devices (id TEXT PRIMARY KEY, hash TEXT NOT NULL UNIQUE, member_id TEXT NOT NULL, name TEXT NOT NULL, created INTEGER NOT NULL, last_seen INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS shares (id TEXT PRIMARY KEY, hash TEXT NOT NULL UNIQUE, label TEXT NOT NULL, created INTEGER NOT NULL);
+      CREATE TABLE IF NOT EXISTS device_agents (device_id TEXT NOT NULL, agent TEXT NOT NULL, installed INTEGER NOT NULL, seen INTEGER, PRIMARY KEY (device_id, agent));
       CREATE TABLE IF NOT EXISTS agents (id TEXT PRIMARY KEY, device_id TEXT NOT NULL, agent TEXT NOT NULL, project TEXT NOT NULL,
         status TEXT NOT NULL, activity TEXT, since INTEGER NOT NULL, last INTEGER NOT NULL, kills INTEGER NOT NULL);
     `);
@@ -68,6 +70,7 @@ export class Realm extends DurableObject<Env> {
     try {
       if (path === "/events" && m === "POST") return await this.postEvent(req);
       if (path === "/connect" && m === "POST") return await this.connectDevice(req);
+      if (path === "/ping" && m === "POST") return await this.ping(req);
       if (path === "/ws" && m === "GET") return await this.openSocket(req, url);
 
       if (m !== "GET" && !sameOrigin(req)) return err(403, "Cross-origin request refused");
@@ -256,7 +259,19 @@ export class Realm extends DurableObject<Env> {
       now,
       now,
     );
+    // Which agent tools the connector is installing hooks for, so the UI can offer a per-agent test.
+    const kinds = Array.isArray(b.agents) ? AGENT_KINDS.filter((k) => (b.agents as unknown[]).includes(k)) : [];
+    for (const k of kinds) this.sql.exec("INSERT OR IGNORE INTO device_agents (device_id, agent, installed, seen) VALUES (?, ?, 1, NULL)", id, k);
     return json({ token, deviceId: id, pc });
+  }
+
+  /** Lets the connector prove that its saved token and the network path work. */
+  private async ping(req: Request): Promise<Response> {
+    const token = bearer(req);
+    const device = token ? this.sql.exec("SELECT id, name FROM devices WHERE hash = ?", await hashToken(token)).toArray()[0] : null;
+    if (!device) return err(401, "Unknown or revoked device");
+    this.sql.exec("UPDATE devices SET last_seen = ? WHERE id = ?", Date.now(), device.id);
+    return json({ ok: true, pc: device.name });
   }
 
   private listDevices(me: Member): Response {
@@ -266,7 +281,14 @@ export class Realm extends DurableObject<Env> {
       me.role === "owner"
         ? this.sql.exec(`${q} ORDER BY d.created`).toArray()
         : this.sql.exec(`${q} WHERE d.member_id = ? ORDER BY d.created`, me.id).toArray();
-    return json({ devices });
+    const hooks = this.sql.exec("SELECT device_id, agent, seen FROM device_agents WHERE installed = 1").toArray();
+    return json({
+      now: Date.now(),
+      devices: devices.map((d) => ({
+        ...d,
+        agents: hooks.filter((h) => h.device_id === d.id).map((h) => ({ agent: h.agent, seen: h.seen })),
+      })),
+    });
   }
 
   private deleteDevice(me: Member, id: string): Response {
@@ -280,6 +302,7 @@ export class Realm extends DurableObject<Env> {
   private dropDevice(id: string): void {
     const agents = this.sql.exec("SELECT id FROM agents WHERE device_id = ?", id).toArray();
     this.sql.exec("DELETE FROM agents WHERE device_id = ?", id);
+    this.sql.exec("DELETE FROM device_agents WHERE device_id = ?", id);
     this.sql.exec("DELETE FROM devices WHERE id = ?", id);
     for (const a of agents) this.broadcast({ t: "gone", id: a.id as string });
   }
@@ -296,6 +319,17 @@ export class Realm extends DurableObject<Env> {
 
     const now = Date.now();
     if (now - (device.last_seen as number) > 60_000) this.sql.exec("UPDATE devices SET last_seen = ? WHERE id = ?", now, device.id);
+
+    // Record that this agent's hooks really fire on this PC (drives the setup checklist).
+    const seen = this.sql.exec("SELECT seen FROM device_agents WHERE device_id = ? AND agent = ?", device.id, ev.agent).toArray()[0];
+    if (!seen || !seen.seen || now - (seen.seen as number) > 5_000) {
+      this.sql.exec(
+        "INSERT INTO device_agents (device_id, agent, installed, seen) VALUES (?, ?, 1, ?) ON CONFLICT(device_id, agent) DO UPDATE SET installed = 1, seen = excluded.seen",
+        device.id,
+        ev.agent,
+        now,
+      );
+    }
 
     const id = `${device.id}:${ev.agent}:${ev.session}`;
     if (ev.event === "end") {

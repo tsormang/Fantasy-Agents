@@ -66,13 +66,18 @@ export class Game {
     store.onChange(sync);
 
     let pending = 0;
-    window.addEventListener("resize", () => {
+    // Observe the container (not just the window) so a pane that starts hidden or tiny still gets laid out.
+    let seen = `${root.clientWidth}x${root.clientHeight}`;
+    new ResizeObserver(() => {
+      const size = `${root.clientWidth}x${root.clientHeight}`;
+      if (size === seen) return;
+      seen = size;
       clearTimeout(pending);
       pending = window.setTimeout(() => {
         this.layout();
         this.sim.setLayout(this.L);
       }, 120);
-    });
+    }).observe(root);
     this.el.addEventListener("pointerdown", (e) => {
       const r = this.el.getBoundingClientRect();
       const id = this.sim.pick((e.clientX - r.left) / this.scale, (e.clientY - r.top) / this.scale);
