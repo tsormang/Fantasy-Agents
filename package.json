@@ -1,0 +1,22 @@
+{
+  "name": "fantasy-agents",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "build": "vite build",
+    "dev": "vite build && wrangler dev",
+    "watch": "vite build --watch",
+    "deploy": "vite build && wrangler deploy",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.worker.json",
+    "test": "node --test test/connector.test.mjs && vitest run"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "latest",
+    "@cloudflare/workers-types": "latest",
+    "typescript": "^5.6.0",
+    "vite": "latest",
+    "vitest": "latest",
+    "wrangler": "^4.0.0"
+  }
+}
