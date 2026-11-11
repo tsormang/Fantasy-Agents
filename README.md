@@ -35,7 +35,7 @@ The art is not in this repository. Tiny Swords is free to use, but its licence d
 npm run art -- "path/to/Tiny Swords (Free Pack)"
 ```
 
-This copies 98 PNGs into `web/src/assets/ts` (git-ignored). You can also unzip the pack into a `Tiny Swords` folder at the repository root (also git-ignored) and run `npm run art` with no path. Run it again whenever you update the pack, then rebuild.
+This copies 99 PNGs into `web/src/assets/ts` (git-ignored). You can also unzip the pack into a `Tiny Swords` folder at the repository root (also git-ignored) and run `npm run art` with no path. Run it again whenever you update the pack, then rebuild.
 
 ## Develop
 

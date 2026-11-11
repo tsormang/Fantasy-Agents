@@ -345,17 +345,158 @@ ul.list li span {
   margin-bottom: 3px;
 }
 
-/* ---------------------------------------------------- Tiny Swords HUD skin */
-/* Switched on by ui.ts once the pack's UI pieces have loaded; without them the plain HUD above stays. */
+/* ---------------------------------------------------- Tiny Swords UI skin */
+/* Switched on by ui.ts once the pack's UI pieces have loaded; without them the plain styling above stays. */
 
-.ts-ui .topbar {
-  align-items: center;
+.ts-ui {
+  --ink-brown: #3a2d2a;
+  --ink-dim: #7d6a56;
+  --ink-teal: #1f6f78;
+  --paper-edge: #b79f7c;
 }
-.ts-ui .title {
+
+/* panels: cream paper with dark ink */
+.ts-ui .box {
   background: none;
   box-shadow: none;
   border-style: solid;
   border-color: transparent;
+  border-width: 14px 14px 15px;
+  border-image: var(--ui-paper) 44 52 45 52 fill / 14px 14px 15px;
+  padding: 4px 6px;
+  color: var(--ink-brown);
+  filter: drop-shadow(0 4px 0 rgba(0, 0, 0, 0.25));
+}
+.ts-ui .box h1 {
+  color: var(--ink-teal);
+  font-size: 15px;
+}
+.ts-ui .box h2 {
+  color: #8a5a2b;
+  margin-top: 10px;
+}
+.ts-ui .box a:not(.btn) {
+  color: var(--ink-teal);
+  font-weight: 700;
+}
+.ts-ui .box .dim,
+.ts-ui .empty {
+  color: var(--ink-dim);
+}
+.ts-ui .err {
+  color: #c0392b;
+  font-weight: 700;
+}
+.ts-ui button:focus-visible,
+.ts-ui input:focus-visible,
+.ts-ui a:focus-visible {
+  outline-color: var(--ink-teal);
+}
+
+/* buttons: blue for the main action, slate for secondary ones, red for destructive ones */
+.ts-ui button,
+.ts-ui .btn {
+  background: none;
+  box-shadow: none;
+  border-style: solid;
+  border-color: transparent;
+  border-width: 11px 12px 13px;
+  border-image: var(--ui-button) 47 45 47 45 fill / 11px 12px 13px;
+  padding: 0 3px;
+  line-height: 14px;
+  color: #fff;
+  font-weight: 700;
+  white-space: nowrap;
+  text-shadow: 0 1px 0 rgba(20, 40, 60, 0.75);
+}
+.ts-ui button.quiet,
+.ts-ui .btn.quiet {
+  border-image-source: var(--ui-button-quiet);
+  border-image-slice: 36 50 49 50 fill;
+}
+.ts-ui button.danger {
+  border-image-source: var(--ui-button-red);
+  text-shadow: 0 1px 0 rgba(90, 20, 20, 0.75);
+}
+.ts-ui button:hover,
+.ts-ui .btn:hover {
+  filter: brightness(1.08);
+}
+.ts-ui button:active,
+.ts-ui .btn:active {
+  box-shadow: none;
+  transform: translateY(2px);
+  filter: brightness(0.92);
+}
+.ts-ui .topbar button,
+.ts-ui .topbar .btn {
+  filter: drop-shadow(0 2px 0 rgba(0, 0, 0, 0.2));
+}
+.ts-ui .topbar button:hover,
+.ts-ui .topbar .btn:hover {
+  filter: drop-shadow(0 2px 0 rgba(0, 0, 0, 0.2)) brightness(1.08);
+}
+
+/* fields, commands and lists on paper */
+.ts-ui input {
+  color: var(--ink-brown);
+  background: #fffaf0;
+  border-color: var(--paper-edge);
+  border-radius: 6px;
+}
+.ts-ui input::placeholder {
+  color: #a8957c;
+}
+.ts-ui code.cmd {
+  background: #2b3a40;
+  border-color: #1d282c;
+  border-radius: 6px;
+  color: #d9f5c8;
+}
+.ts-ui ul.list li {
+  border-bottom-color: #d3bf9c;
+}
+.ts-ui .check {
+  background: rgba(126, 86, 40, 0.1);
+  border-color: var(--paper-edge);
+  border-radius: 6px;
+}
+.ts-ui .check.ok {
+  border-color: #4a9a5a;
+}
+.ts-ui .check.ok .state {
+  color: #2f7a40;
+}
+.ts-ui .check.wait {
+  border-color: #c9962a;
+}
+.ts-ui .check.wait .state {
+  color: #9a6510;
+}
+.ts-ui .check.off .state {
+  color: var(--ink-dim);
+}
+.ts-ui .check .state {
+  font-weight: 700;
+}
+
+/* pages sit on grass, dialogs dim the battlefield */
+.ts-ui .page {
+  background: #6f9b3d var(--ui-grass) 0 0 / 64px 64px;
+}
+.ts-ui .modal {
+  background: rgba(18, 44, 46, 0.55);
+}
+.ts-ui .modal > .box,
+.ts-ui .page > .box {
+  padding: 6px 10px 8px;
+}
+
+/* HUD: ribbon title and the roster */
+.ts-ui .topbar {
+  align-items: center;
+}
+.ts-ui .title {
   border-width: 0 40px 0 41px;
   border-image: var(--ui-ribbon) 0 97 0 98 fill / 0 40px 0 41px;
   height: 43px;
@@ -371,61 +512,32 @@ ul.list li span {
   color: #d6f1f2;
 }
 
-.ts-ui .topbar button,
-.ts-ui .topbar .btn {
-  background: none;
-  box-shadow: none;
-  border-style: solid;
-  border-color: transparent;
-  border-width: 11px 12px 13px;
-  border-image: var(--ui-button) 47 45 47 45 fill / 11px 12px 13px;
-  padding: 0 3px;
-  line-height: 14px;
-  color: #fff;
-  font-weight: 700;
-  text-shadow: 0 1px 0 rgba(20, 40, 60, 0.75);
-  filter: drop-shadow(0 2px 0 rgba(0, 0, 0, 0.2));
-}
-.ts-ui .topbar button.danger {
-  border-image-source: var(--ui-button-red);
-}
-.ts-ui .topbar button:hover,
-.ts-ui .topbar .btn:hover {
-  filter: drop-shadow(0 2px 0 rgba(0, 0, 0, 0.2)) brightness(1.08);
-}
-.ts-ui .topbar button:active,
-.ts-ui .topbar .btn:active {
-  transform: translateY(2px);
-  filter: brightness(0.92);
-}
-
 .ts-ui .roster {
   top: 56px;
   max-height: calc(100% - 68px);
-  background: none;
-  box-shadow: none;
-  border-style: solid;
-  border-color: transparent;
-  border-width: 14px 14px 15px;
-  border-image: var(--ui-paper) 44 52 45 52 fill / 14px 14px 15px;
   padding: 0;
-  color: #3a2d2a;
-  filter: drop-shadow(0 4px 0 rgba(0, 0, 0, 0.25));
-  scrollbar-color: #b79f7c transparent;
+  scrollbar-color: var(--paper-edge) transparent;
 }
 .ts-ui .hero {
-  color: #3a2d2a;
+  border: 2px solid transparent;
+  border-image: none;
+  border-radius: 6px;
+  color: var(--ink-brown);
+  font-weight: 400;
+  line-height: inherit;
+  text-shadow: none;
+  white-space: normal;
   grid-template-columns: 40px 1fr auto;
   padding: 3px 4px;
-  border-radius: 6px;
 }
 .ts-ui .hero + .hero {
   margin-top: 2px;
 }
 .ts-ui .hero:hover,
-.ts-ui .hero.sel {
+.ts-ui .hero:active {
   background: rgba(126, 86, 40, 0.14);
-  border-color: transparent;
+  filter: none;
+  transform: none;
 }
 .ts-ui .hero.sel {
   background: rgba(126, 86, 40, 0.24);
@@ -439,9 +551,8 @@ ul.list li span {
   font-weight: 700;
 }
 .ts-ui .hero .time,
-.ts-ui .hero .what,
-.ts-ui .empty {
-  color: #7d6a56;
+.ts-ui .hero .what {
+  color: var(--ink-dim);
 }
 .ts-ui .hero .what.working {
   color: #2f6f73;

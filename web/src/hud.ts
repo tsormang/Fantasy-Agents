@@ -5,7 +5,6 @@ import { hash } from "./game/pix";
 import { img, loaded } from "./game/art";
 import { CLASS_LABEL, CLASS_OF, PC_COLORS } from "./game/sprites";
 import type { Store } from "./store";
-import { loadSkins } from "./ui";
 
 const VERB: Record<string, string> = {
   edit: "Forging code",
@@ -38,7 +37,6 @@ export class Hud {
     private game: Game,
     actions: HTMLElement[] = [],
   ) {
-    loadSkins();
     this.dot = el("span", { class: "dot", title: "Connection" });
     this.stats = el("span", { class: "stats dim" });
     const toggle = el("button", { class: "quiet", textContent: "Heroes" });

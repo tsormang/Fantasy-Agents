@@ -4,6 +4,7 @@ import { Game } from "./game/game";
 import { Hud } from "./hud";
 import { type Member, adminPage, connectModal, joinPage, landingPage } from "./pages";
 import { Store, connect } from "./store";
+import { loadSkins } from "./ui";
 
 const root = document.getElementById("app")!;
 const path = location.pathname;
@@ -16,6 +17,7 @@ function battlefield(store: Store, actions: HTMLElement[] = []): void {
 }
 
 async function main(): Promise<void> {
+  loadSkins();
   if (query.has("demo")) {
     const store = new Store();
     startDemo(store);

@@ -1,7 +1,7 @@
-// Tiny Swords UI skins for the HUD. The pack ships each panel as nine pieces with gaps between
+// Tiny Swords UI skins for the HUD, dialogs and pages. The pack ships each panel as nine pieces with gaps between
 // them, so they are stitched into one image here and handed to CSS as border-image sources.
 // The skin only switches on (html.ts-ui) once every piece has loaded, so without the sprites
-// the plain HUD styling stays.
+// the plain styling stays.
 import { img, whenLoaded } from "./game/art";
 
 type Span = [from: number, to: number];
@@ -21,6 +21,10 @@ const SKINS: Skin[] = [
   { prop: "--ui-paper", sheet: "ui_paper", xs: THREE, ys: THREE, crop: [12, 20, 168, 153] },
   { prop: "--ui-button", sheet: "ui_button_blue", xs: THREE, ys: THREE, crop: [19, 17, 154, 158] },
   { prop: "--ui-button-red", sheet: "ui_button_red", xs: THREE, ys: THREE, crop: [19, 17, 154, 158] },
+  // the pack's "pressed" blue button is a muted slate, used here for secondary buttons
+  { prop: "--ui-button-quiet", sheet: "ui_button_quiet", xs: THREE, ys: THREE, crop: [14, 28, 164, 149] },
+  // the plain grass tile from the middle of the terrain nine-patch, as a page background
+  { prop: "--ui-grass", sheet: "tiles", xs: [[64, 128]], ys: [[64, 128]], crop: [0, 0, 64, 64] },
   // first row of the big ribbons: the blue one
   { prop: "--ui-ribbon", sheet: "ui_ribbons", xs: [[0, 128], [192, 256], [320, 448]], ys: [[0, 128]], crop: [30, 20, 259, 103] },
 ];

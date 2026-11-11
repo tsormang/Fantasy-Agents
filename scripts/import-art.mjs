@@ -105,6 +105,7 @@ Object.assign(files, {
   ui_paper: `${ui}/Papers/RegularPaper.png`,
   ui_button_blue: `${ui}/Buttons/BigBlueButton_Regular.png`,
   ui_button_red: `${ui}/Buttons/BigRedButton_Regular.png`,
+  ui_button_quiet: `${ui}/Buttons/BigBlueButton_Pressed.png`,
   ui_ribbons: `${ui}/Ribbons/BigRibbons.png`,
 });
 ["blue", "red", "yellow", "purple"].forEach((color, c) => {
