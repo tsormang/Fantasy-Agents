@@ -46,7 +46,7 @@ npm run deploy
 ## Use
 
 1. Open the site and sign in with the owner token.
-2. **Connect PC** shows two commands to run on a machine. The connector lists the hook files it will change, asks before writing, keeps existing hooks and makes backups.
+2. **Connect PC** shows one command to paste into a terminal on a machine, then a checklist that confirms each agent tool reports in. The browser remembers the PC it paired, so reopening the dialog goes straight to its status. The connector lists the hook files it will change, asks before writing, keeps existing hooks and makes backups.
 3. **Council** creates single-use invite links for other people and revocable read-only spectator links (`/watch/...`) for TVs or phones.
 4. To remove a PC: `node ~/.fantasy-agents/fa.mjs disconnect`, and revoke it under Connect PC.
 

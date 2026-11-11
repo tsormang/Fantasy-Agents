@@ -129,10 +129,43 @@ interface Device {
   agents: { agent: string; seen: number | null }[];
 }
 
+/** Which PC was paired from this browser. A per-browser convenience only; the server does not depend on it. */
+const THIS_PC = "fa.thisPc";
+const recall = (): string | null => {
+  try {
+    return localStorage.getItem(THIS_PC);
+  } catch {
+    return null;
+  }
+};
+const remember = (id: string | null): void => {
+  try {
+    if (id) localStorage.setItem(THIS_PC, id);
+    else localStorage.removeItem(THIS_PC);
+  } catch {
+    /* storage unavailable: the dialog just will not remember */
+  }
+};
+
+/** One command for any shell (PowerShell, cmd, bash, zsh): download the connector to the temp folder and run it. */
+export function connectCommand(base: string, code: string): string {
+  return (
+    `node -e "fetch('${base}/fa.mjs').then(r=>r.text()).then(s=>{const f=require('os').tmpdir()+'/fa.mjs';` +
+    `require('fs').writeFileSync(f,s);require('child_process').spawnSync(process.execPath,[f,'connect','${base}','${code}'],{stdio:'inherit'})})"`
+  );
+}
+
 export async function connectModal(root: HTMLElement): Promise<void> {
-  const body = el("div", {});
+  const intro = el("div", {});
+  const pairBox = el("div", {});
+  const devicesEl = el("ul", { class: "list" });
+  const checklist = el("div", {});
   const close = el("button", { class: "quiet", textContent: "Close" });
-  const modal = el("div", { class: "modal" }, el("div", { class: "box" }, el("h1", { textContent: "Connect a PC" }), body, close));
+  const modal = el(
+    "div",
+    { class: "modal" },
+    el("div", { class: "box" }, el("h1", { textContent: "Connect a PC" }), intro, pairBox, el("h2", { textContent: "Connected PCs" }), devicesEl, checklist, close),
+  );
   let timer = 0;
   close.onclick = () => {
     clearInterval(timer);
@@ -140,11 +173,47 @@ export async function connectModal(root: HTMLElement): Promise<void> {
   };
   root.append(modal);
 
-  const devicesEl = el("ul", { class: "list" });
-  const checklist = el("div", {});
   let known: Set<string> | null = null;
   /** Which PC is being tested, and from what moment an event counts as a pass. */
   let testing: { id: string; since: number } | null = null;
+  let pairing = false;
+
+  const showPair = async () => {
+    if (pairing) return;
+    pairing = true;
+    try {
+      const { code } = await api<{ code: string }>("/pair", "POST");
+      const cmd = connectCommand(origin(), code);
+      pairBox.replaceChildren(
+        el("h2", { textContent: "Add a PC" }),
+        el("p", { textContent: "Paste this one command into a terminal on the PC you want to connect (needs Node 18 or newer):" }),
+        el("div", { class: "row" }, el("code", { class: "cmd grow", textContent: cmd }), copyButton(() => cmd)),
+        el("p", {
+          class: "dim",
+          textContent:
+            "The code inside works once and expires in 10 minutes. The connector lists the hook files it will change and asks before writing. It only ever sends: agent type, project folder name and activity kind. This dialog continues by itself once the PC connects.",
+        }),
+      );
+    } catch (x) {
+      pairing = false;
+      pairBox.replaceChildren(el("p", { class: "err", textContent: (x as Error).message }));
+    }
+  };
+
+  const renderIntro = (list: Device[]) => {
+    const mine = list.find((d) => d.id === recall());
+    if (!mine) return intro.replaceChildren();
+    const add = el("button", { class: "quiet", textContent: "Add another PC" });
+    add.hidden = pairing;
+    add.onclick = () => {
+      add.hidden = true;
+      void showPair();
+    };
+    intro.replaceChildren(
+      el("p", { textContent: `This browser's PC is connected as "${mine.name}". Nothing to set up again.` }),
+      el("p", {}, add),
+    );
+  };
 
   const renderChecklist = (list: Device[], now: number) => {
     const t0 = testing;
@@ -158,7 +227,15 @@ export async function connectModal(root: HTMLElement): Promise<void> {
       const entry = d.agents.find((a) => a.agent === t.agent);
       const passed = passedFor(t.agent);
       const unknown = !entry && !d.reported;
-      const state = unknown ? "Not heard from yet" : !entry ? "Not set up on this PC" : passed ? "OK - hero summoned" : "Waiting for a prompt...";
+      const state = unknown
+        ? "Not heard from yet"
+        : !entry
+          ? "Not set up on this PC"
+          : passed
+            ? t0.since
+              ? "OK - hero summoned"
+              : `OK - last heard ${ago(now - entry.seen!)} ago`
+            : "Waiting for a prompt...";
       const item = el(
         "div",
         { class: `check ${passed ? "ok" : entry || unknown ? "wait" : "off"}` },
@@ -170,7 +247,7 @@ export async function connectModal(root: HTMLElement): Promise<void> {
           el("ol", {}, ...t.steps.map((s) => el("li", { textContent: s }))),
         );
       } else if (!entry) {
-        item.append(el("p", { class: "dim", textContent: "The connector did not find this tool here. If you install it later, run the two commands again." }));
+        item.append(el("p", { class: "dim", textContent: "The connector did not find this tool here. If you install it later, add this PC again." }));
       } else if (!passed) {
         if (entry.seen) item.append(el("p", { class: "dim", textContent: `Last heard from it ${ago(now - entry.seen)} ago. Send a prompt to test again.` }));
         item.append(el("ol", {}, ...t.steps.map((s) => el("li", { textContent: s }))));
@@ -179,10 +256,10 @@ export async function connectModal(root: HTMLElement): Promise<void> {
     });
     const done = TOOLS.every((t) => (d.agents.some((a) => a.agent === t.agent) ? passedFor(t.agent) : !!d.reported));
     checklist.replaceChildren(
-      el("h2", { textContent: `Test "${d.name}"` }),
+      el("h2", { textContent: `Agents on "${d.name}"` }),
       el("p", {
         textContent: done
-          ? "Everything that is set up on this PC is reporting in. You can close this."
+          ? "Everything that is set up on this PC is reporting in."
           : "In each tool below, start a new session and send any prompt. This list updates by itself.",
       }),
       ...rows,
@@ -193,56 +270,53 @@ export async function connectModal(root: HTMLElement): Promise<void> {
 
   const refresh = async () => {
     const { devices: list, now } = await api<{ devices: Device[]; now: number }>("/devices");
+    const first = !known;
     if (!known) known = new Set(list.map((d) => d.id));
-    // A PC that appears while this dialog is open was just paired: start testing it.
+    // A PC that appears while this dialog is open was just paired from here: remember it and start testing it.
     const fresh = list.find((d) => !known!.has(d.id));
     if (fresh) {
       known.add(fresh.id);
+      remember(fresh.id);
       testing = { id: fresh.id, since: 0 };
+      pairing = false;
+      pairBox.replaceChildren();
+    }
+    if (first) {
+      const mine = list.find((d) => d.id === recall());
+      if (mine) testing = { id: mine.id, since: 0 };
+      else {
+        // never paired from this browser, or that PC was revoked since
+        remember(null);
+        void showPair();
+      }
     }
     devicesEl.replaceChildren(
       ...list.map((d) => {
-        const test = el("button", { class: "quiet", textContent: testing?.id === d.id ? "Testing" : "Test" });
+        const here = d.id === recall() ? " - this PC" : "";
+        const test = el("button", { class: "quiet", textContent: "Test" });
         test.onclick = () => {
           testing = { id: d.id, since: now };
           void refresh();
         };
         const rm = el("button", { class: "danger", textContent: "Revoke" });
         rm.onclick = async () => {
-          if (!confirm(`Revoke "${d.name}"? Its agents will stop appearing.`)) return;
+          if (!confirm(`Revoke "${d.name}"? Its agents will stop appearing and it must be added again to come back.`)) return;
           await api(`/devices/${d.id}`, "DELETE");
           void refresh();
         };
-        return el("li", {}, el("span", { textContent: `${d.name} (${d.owner})` }), test, rm);
+        return el("li", {}, el("span", { textContent: `${d.name} (${d.owner})${here}` }), test, rm);
       }),
     );
     if (!list.length) devicesEl.append(el("li", { class: "dim" }, el("span", { textContent: "No PCs connected yet." })));
+    renderIntro(list);
     renderChecklist(list, now);
   };
 
   try {
-    const { code } = await api<{ code: string }>("/pair", "POST");
-    const get = `node -e "fetch('${origin()}/fa.mjs').then(r=>r.text()).then(s=>require('fs').writeFileSync('fa.mjs',s))"`;
-    const run = `node fa.mjs connect ${origin()} ${code}`;
-    body.append(
-      el("h2", { textContent: "1. Run on the PC" }),
-      el("p", { textContent: "In a terminal on the PC you want to connect (needs Node 18 or newer):" }),
-      el("div", { class: "row" }, el("code", { class: "cmd grow", textContent: get }), copyButton(() => get)),
-      el("div", { class: "row" }, el("code", { class: "cmd grow", textContent: run }), copyButton(() => run)),
-      el("p", {
-        class: "dim",
-        textContent:
-          "The code works once and expires in 10 minutes. The connector shows which hook files it will change and asks before writing. It only ever sends: agent type, project folder name and activity kind.",
-      }),
-      el("h2", { textContent: "2. Test the agents" }),
-      el("p", { class: "dim", textContent: "A newly connected PC shows up here by itself. Press Test on any PC to check it again." }),
-      devicesEl,
-      checklist,
-    );
     await refresh();
     timer = window.setInterval(() => void refresh().catch(() => {}), 3000);
   } catch (x) {
-    body.append(el("p", { class: "err", textContent: (x as Error).message }));
+    intro.replaceChildren(el("p", { class: "err", textContent: (x as Error).message }));
   }
 }
 
