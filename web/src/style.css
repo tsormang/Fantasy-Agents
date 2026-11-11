@@ -35,8 +35,6 @@ canvas.field {
   position: absolute;
   top: 0;
   left: 0;
-  image-rendering: pixelated;
-  image-rendering: crisp-edges;
   touch-action: manipulation;
   cursor: pointer;
 }
@@ -215,7 +213,6 @@ a {
 .hero canvas {
   width: 32px;
   height: 32px;
-  image-rendering: pixelated;
   grid-row: span 2;
 }
 .hero .name {

@@ -1,14 +1,14 @@
 # Fantasy Agents
 
-A live pixel-art battlefield for your coding agents. Every Claude Code, Codex or Cursor session on a connected PC is a hero: idle heroes rest in the village, working heroes march out of the gate and fight goblins and skeletons until the task is done.
+A live battlefield for your coding agents, drawn with the Tiny Swords art pack. Every Claude Code, Codex or Cursor session on a connected PC is a hero: idle heroes rest in the village, working heroes cross the bridge and fight the black army's raiders and lancers until the task is done.
 
 | Agent | Class | Activity on screen |
 | --- | --- | --- |
-| Claude Code | Mage (staff, fire bolts) | edit = sparks, command = shockwave, search/read = scrying ring, web = arcane ring, sub-agent = familiar |
-| Codex | Barbarian (axe) | same effects, melee |
-| Cursor | Ranger (bow) | same effects, arrows |
+| Claude Code | Monk (casts bolts) | edit = sparks, command = explosion, search/read = scrying ring, web = arcane ring, sub-agent = familiar |
+| Codex | Warrior (sword and shield) | same effects, melee |
+| Cursor | Archer (bow) | same effects, arrows |
 
-Cloak colour identifies the PC. A task running longer than 10 minutes draws a goblin warlord. An agent waiting for your approval shows a "!" bubble while enemies circle. A PC that goes quiet for 10 minutes fades its heroes.
+Faction colour (blue, red, yellow or purple) identifies the PC. A task running longer than 10 minutes draws a black knight warlord. An agent waiting for your approval shows a "!" bubble while enemies circle. A PC that goes quiet for 10 minutes fades its heroes.
 
 ## How it works
 
@@ -17,16 +17,31 @@ PC hooks --POST /api/events--> Worker --> Realm Durable Object --WebSocket--> br
 ```
 
 - `worker/` Cloudflare Worker and the `Realm` Durable Object (SQLite state, hibernating WebSockets).
-- `web/` Vite + TypeScript + Canvas 2D client. All art is original and drawn in code (`web/src/game/sprites.ts`, `world.ts`).
+- `web/` Vite + TypeScript + Canvas 2D client. Art is [Tiny Swords by Pixel Frog](https://pixelfrog-assets.itch.io/tiny-swords) (free pack), which you download yourself: see [Get the sprites](#get-the-sprites). Sprite and scene definitions are in `web/src/game/sprites.ts` and `world.ts`.
 - `connector/fa.mjs` dependency-free Node script that installs hooks and posts events. Served by the Worker at `/fa.mjs`.
 - `shared/protocol.ts` wire format.
 
 **Privacy:** a connected PC sends only the agent type, a hashed session id, the project folder name and an activity kind (`edit`, `command`, `search`, `read`, `web`, `subagent`, `think`). Prompts, commands, paths and code never leave the machine. This is enforced in `mapHook` and covered by a test.
 
+## Get the sprites
+
+The art is not in this repository. Tiny Swords is free to use, but its licence does not allow the files to be redistributed, so each person downloads their own copy. Without it the project still builds, but the battlefield shows only water and name labels.
+
+1. Open <https://pixelfrog-assets.itch.io/tiny-swords> and choose **Download Now** (the price is pay-what-you-want; "No thanks, just take me to the downloads" is fine).
+2. Download **Tiny Swords (Free Pack).zip** and unzip it anywhere. The Enemy Pack and the legacy edition are not needed.
+3. Copy the sheets the game uses into the project:
+
+```bash
+npm run art -- "path/to/Tiny Swords (Free Pack)"
+```
+
+This copies 82 PNGs into `web/src/assets/ts` (git-ignored). You can also unzip the pack into a `Tiny Swords` folder at the repository root (also git-ignored) and run `npm run art` with no path. Run it again whenever you update the pack, then rebuild.
+
 ## Develop
 
 ```bash
 npm install
+npm run art -- "path/to/Tiny Swords (Free Pack)"   # once, see above
 npm run dev        # builds the client, then wrangler dev on http://localhost:8787
 npm test           # connector tests (node:test) + Worker tests (vitest in workerd)
 npm run typecheck

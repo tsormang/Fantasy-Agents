@@ -1,271 +1,103 @@
-// Original pixel art, authored as palette-indexed grids. All characters face right.
+// Character definitions on top of the Tiny Swords unit sheets. All units face right; left is a flip.
 import type { AgentKind } from "../../../shared/protocol";
-import { type Palette, type Sprite, bake, flipX, rotate, silhouette } from "./pix";
+import { type Strip, strip } from "./art";
+import { type Palette, type Sprite, bake } from "./pix";
 
-const BASE: Palette = {
-  k: "#1b1622", // outline
-  s: "#e8b592", // skin
-  w: "#f4efe6", // white
-  m: "#b8c0cc", // metal
-  M: "#7b8494",
-  b: "#8a5a34", // wood / leather
-  B: "#5e3a22",
-  g: "#f2c14e", // gold
-  o: "#ff9d3c", // ember
-  p: "#b46cff", // arcane
-  r: "#e0483c", // red
-  G: "#6fae3f", // goblin skin
-  D: "#3f7a2c",
-  n: "#e6e0cc", // bone
-  N: "#b3ab93",
-  h: "#b5562a", // hair
-};
+/** Faction colours: one per PC, so machines can be told apart at a glance. Black is the enemy. */
+export const PC_COLORS = ["blue", "red", "yellow", "purple"] as const;
 
-/** Cloak colours: one per PC, so machines can be told apart at a glance. */
-export const PC_COLORS: [string, string][] = [
-  ["#3f7fd6", "#2a579c"], // blue
-  ["#d6473f", "#9c2a2a"], // red
-  ["#3fae6a", "#2a7a48"], // green
-  ["#c9a227", "#94741a"], // gold
-  ["#9a5fd6", "#6a3d9c"], // violet
-  ["#2fb5b5", "#1f7f7f"], // teal
-  ["#e07a3a", "#a65424"], // orange
-  ["#d65fa8", "#9c3d78"], // pink
-];
-
-/** Trim colours: one per agent kind. */
-const KIND_TRIM: Record<string, [string, string]> = {
-  claude: ["#e8824a", "#b55c2e"],
-  codex: ["#5a6272", "#3c4350"],
-  cursor: ["#4c8a57", "#35633e"],
-  other: ["#8d8d99", "#63636e"],
-};
-
-export type HeroClass = "mage" | "barbarian" | "ranger" | "squire";
-export const CLASS_OF: Record<AgentKind, HeroClass> = { claude: "mage", codex: "barbarian", cursor: "ranger" };
-export const CLASS_LABEL: Record<HeroClass, string> = { mage: "Mage", barbarian: "Barbarian", ranger: "Ranger", squire: "Squire" };
-
-interface CharArt {
-  body: string[];
-  /** Replacement for the last three rows on the second walk frame. */
-  legsB?: string[];
-}
-
-const MAGE: CharArt = {
-  body: [
-    "................",
-    "......kkkk......",
-    ".....kcccck.....",
-    "....kccccCck....",
-    "....kcsssCck....",
-    "....kcsksksk....",
-    "....kcsssssk....",
-    ".....kkssCk.....",
-    "....kccaacck....",
-    "...kcccaaccck...",
-    "...kcCcaacCck...",
-    "...ksCcaacCsk...",
-    "....kCcaacCk....",
-    "....kccaacck....",
-    "...kcccaaccck...",
-    "...kkkkkkkkkk...",
-  ],
-  legsB: ["....kccaacck....", "....kcccaacck...", "....kkkkkkkkk..."],
-};
-
-const BARBARIAN: CharArt = {
-  body: [
-    "................",
-    "...w......w.....",
-    "...wkkkkkkw.....",
-    "...kmmmmmmk.....",
-    "...kmMmmMmk.....",
-    "...kssssssk.....",
-    "...ksskssksk....",
-    "...khhhhhhk.....",
-    "..kckhhhhkck....",
-    ".kcsksssskssk...",
-    ".kcsksssskssk...",
-    ".kckkaaaakkk....",
-    "..kckaaaak......",
-    "...kkaakaak.....",
-    "...kbbkkbbk.....",
-    "...kkk..kkk.....",
-  ],
-  legsB: ["...kkaaaakk.....", "....kbbkbbk.....", "....kkkkkkk....."],
-};
-
-const RANGER: CharArt = {
-  body: [
-    "................",
-    "......kkkk......",
-    ".....kcccck.....",
-    "....kccccCck....",
-    "....kcsssssk....",
-    "....kcsksksk....",
-    "....kcsssssk....",
-    ".....kksssk.....",
-    "....kcaaaack....",
-    "...kccaaaaCck...",
-    "...kscagaaCsk...",
-    "...kkcaaaaCkk...",
-    "....kcaaaaCk....",
-    "....kbbkkbbk....",
-    "....kbbk.kbbk...",
-    "....kkkk.kkkk...",
-  ],
-  legsB: ["....kbbkbbk.....", ".....kbbbbk.....", ".....kkkkkk....."],
-};
-
-const SQUIRE: CharArt = {
-  body: [
-    "................",
-    "......kkkk......",
-    ".....kmmmmk.....",
-    "....kmmmmmMk....",
-    "....kmkkkkMk....",
-    "....kmsksksk....",
-    "....kmmmmmMk....",
-    ".....kkmmkk.....",
-    "....kcccccck....",
-    "...kmccgcccmk...",
-    "...kmccccccmk...",
-    "...kskccccksk...",
-    "....kcccccck....",
-    "....kMMkkMMk....",
-    "....kMMk.kMMk...",
-    "....kkkk.kkkk...",
-  ],
-  legsB: ["....kMMkMMk.....", ".....kMMMMk.....", ".....kkkkkk....."],
-};
-
-const GOBLIN: CharArt = {
-  body: [
-    "................",
-    "................",
-    "................",
-    "................",
-    "..k...kkkk...k..",
-    ".kGk.kGGGGk.kGk.",
-    ".kGGkGGGGGGkGGk.",
-    "..kkGrGGGGrGkk..",
-    "....kGGGGGGk....",
-    "....kGkwwkGk....",
-    ".....kGGGGk.....",
-    "....kGbbbbGk....",
-    "...kGkbbbbkGk...",
-    "...kk.kDDk.kk...",
-    ".....kGkkGk.....",
-    ".....kkk.kkk....",
-  ],
-  legsB: ["...kk.kDDk.kk...", "......kGGk......", "......kkkk......"],
-};
-
-const SKELETON: CharArt = {
-  body: [
-    "................",
-    "......kkkk......",
-    ".....knnnnk.....",
-    "....knnnnnnk....",
-    "....knknnknk....",
-    "....knnnnnnk....",
-    ".....knkknk.....",
-    "......knnk......",
-    "....kknnnnkk....",
-    "...knknNNnknk...",
-    "...knknnnnknk...",
-    "...knkkNNkknk...",
-    "...kk.knnk.kk...",
-    ".....knkknk.....",
-    ".....knk.knk....",
-    ".....kkk.kkk....",
-  ],
-  legsB: ["...kk.knnk.kk...", "......knnk......", "......kkkk......"],
-};
-
-const WEAPONS: Record<string, string[]> = {
-  staff: [".o.", "ogo", ".o.", ".b.", ".b.", ".b.", ".b.", ".b.", ".b.", ".b.", ".b.", ".b."],
-  axe: [".mmk.", "mmmbk", "mmmbk", ".mkbk", "..kbk", "..kbk", "..kbk", "..kbk", "..kbk", "..kkk"],
-  bow: ["kb...", ".kb..", "..kb.", "..wkb", "..wkb", "..wkb", "..wkb", "..kb.", ".kb..", "kb..."],
-  sword: [".m.", ".m.", ".m.", ".m.", ".m.", ".m.", "ggg", ".b.", ".b."],
-  club: [".BB.", "BbbB", "BbbB", "BbbB", ".bB.", ".b..", ".b..", ".b.."],
-  bone: ["n.n", ".n.", ".n.", ".n.", ".n.", ".n.", "NnN", ".N."],
-};
+export type HeroClass = "monk" | "warrior" | "archer";
+export const CLASS_OF: Record<AgentKind, HeroClass> = { claude: "monk", codex: "warrior", cursor: "archer" };
+export const CLASS_LABEL: Record<HeroClass, string> = { monk: "Monk", warrior: "Warrior", archer: "Archer" };
 
 export interface CharSprites {
-  /** [right, left] x [frameA, frameB] */
-  walk: [Sprite, Sprite][];
-  flash: [Sprite, Sprite];
-  weapon: { rest: [Sprite, Sprite]; strike: [Sprite, Sprite] };
-  w: number;
+  idle: Strip;
+  run: Strip;
+  /** cycled through, one per attack */
+  attacks: Strip[];
+  /** seconds one attack animation takes */
+  attackTime: number;
+  /** fraction of the attack at which the blow lands or the shot leaves */
+  release: number;
+  /** height of the figure in world units, for labels */
   h: number;
+  scale: number;
 }
 
-function build(art: CharArt, pal: Palette, weapon: string, scale = 1): CharSprites {
-  const a = bake(art.body, pal, scale);
-  const rowsB = art.legsB ? [...art.body.slice(0, -art.legsB.length), ...art.legsB] : art.body;
-  const b = bake(rowsB, pal, scale);
-  const wr = bake(WEAPONS[weapon], pal, scale);
-  const ws = rotate(wr);
-  const white = silhouette(a, "#ffffff");
-  return {
-    walk: [
-      [a, flipX(a)],
-      [b, flipX(b)],
-    ],
-    flash: [white, flipX(white)],
-    weapon: { rest: [wr, flipX(wr)], strike: [ws, flipX(ws)] },
-    w: a.width,
-    h: a.height,
-  };
-}
+// Unit sheets use 192px frames with the feet at (96, 136); the lancer uses 320px frames.
+const unit = (name: string): Strip => strip(name, 192, 96, 136);
+const lance = (name: string): Strip => strip(name, 320, 152, 198);
 
-const HERO_ART: Record<HeroClass, [CharArt, string]> = {
-  mage: [MAGE, "staff"],
-  barbarian: [BARBARIAN, "axe"],
-  ranger: [RANGER, "bow"],
-  squire: [SQUIRE, "sword"],
-};
+function heroSet(cls: HeroClass, color: string): CharSprites {
+  const u = (n: string) => unit(`${color}_${cls}_${n}`);
+  switch (cls) {
+    case "monk":
+      return { idle: u("idle"), run: u("run"), attacks: [u("cast")], attackTime: 0.6, release: 0.5, h: 19, scale: 1 };
+    case "archer":
+      return { idle: u("idle"), run: u("run"), attacks: [u("shoot")], attackTime: 0.6, release: 0.62, h: 23, scale: 1 };
+    default:
+      return { idle: u("idle"), run: u("run"), attacks: [u("attack1"), u("attack2")], attackTime: 0.4, release: 0.5, h: 23, scale: 1 };
+  }
+}
 
 const heroCache = new Map<string, CharSprites>();
 
 export function heroSprites(kind: AgentKind, pcColor: number): CharSprites {
-  const cls = CLASS_OF[kind] ?? "squire";
-  const key = `${cls}:${kind}:${pcColor}`;
+  const cls = CLASS_OF[kind] ?? "warrior";
+  const color = PC_COLORS[pcColor % PC_COLORS.length];
+  const key = `${cls}:${color}`;
   let s = heroCache.get(key);
   if (!s) {
-    const [c, C] = PC_COLORS[pcColor % PC_COLORS.length];
-    const [a, A] = KIND_TRIM[kind] ?? KIND_TRIM.other;
-    const [art, weapon] = HERO_ART[cls];
-    s = build(art, { ...BASE, c, C, a, A }, weapon);
+    s = heroSet(cls, color);
     heroCache.set(key, s);
   }
   return s;
 }
 
-export type EnemyKind = "goblin" | "skeleton" | "boss";
-let enemyCache: Record<EnemyKind, CharSprites> | null = null;
+/** The black faction: axe raiders, lancers, and an oversized knight as the warlord. */
+export type EnemyKind = "raider" | "lancer" | "boss";
 
-export function enemySprites(kind: EnemyKind): CharSprites {
-  if (!enemyCache) {
-    enemyCache = {
-      goblin: build(GOBLIN, BASE, "club"),
-      skeleton: build(SKELETON, BASE, "bone"),
-      // The warlord is a goblin drawn double size in a darker hide.
-      boss: build(GOBLIN, { ...BASE, G: "#a3564a", D: "#6e3a34", b: "#4a4458", r: "#ffd23c" }, "club", 2),
-    };
-  }
-  return enemyCache[kind];
-}
+const ENEMIES: Record<EnemyKind, CharSprites> = {
+  raider: {
+    idle: unit("black_pawn_idle"),
+    run: unit("black_pawn_run"),
+    attacks: [unit("black_pawn_attack")],
+    attackTime: 0.5,
+    release: 0.5,
+    h: 19,
+    scale: 1,
+  },
+  lancer: {
+    idle: lance("black_lancer_idle"),
+    run: lance("black_lancer_run"),
+    attacks: [lance("black_lancer_attack")],
+    attackTime: 0.35,
+    release: 0.5,
+    h: 22,
+    scale: 1,
+  },
+  boss: {
+    idle: unit("black_warrior_idle"),
+    run: unit("black_warrior_run"),
+    attacks: [unit("black_warrior_attack1")],
+    attackTime: 0.45,
+    release: 0.5,
+    h: 36,
+    scale: 1.6,
+  },
+};
+
+export const enemySprites = (kind: EnemyKind): CharSprites => ENEMIES[kind];
+
+export const ARROW = strip("arrow", 64, 32, 32);
+export const DUST = strip("dust", 64, 32, 40);
+export const BOOM = strip("boom", 192, 96, 92);
+
+// Small overlay marks, kept as chunky pixels so they read at any zoom.
+const MARK: Palette = { k: "#1b1622", w: "#f4efe6", r: "#e0483c", p: "#b9f06a" };
 
 /** Small familiar summoned for sub-agents. */
-export const WISP = (): Sprite =>
-  bake([".pp.", "pwwp", "pwwp", ".pp.", "..p."], BASE);
+export const WISP = (): Sprite => bake([".pp.", "pwwp", "pwwp", ".pp.", "..p."], MARK);
 
 export const BUBBLE = (): Sprite =>
-  bake(
-    [".kkkkk.", "kwwwwwk", "kwwrwwk", "kwwrwwk", "kwwrwwk", "kwwwwwk", "kwwrwwk", "kwwwwwk", ".kkwkk.", "...k..."],
-    BASE,
-  );
-
-export const ARROW = (): Sprite => bake(["bbbbm"], BASE);
+  bake([".kkkkk.", "kwwwwwk", "kwwrwwk", "kwwrwwk", "kwwrwwk", "kwwwwwk", "kwwrwwk", "kwwwwwk", ".kkwkk.", "...k..."], MARK);

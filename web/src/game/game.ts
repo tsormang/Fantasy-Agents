@@ -1,8 +1,10 @@
-// Canvas, resize handling, render loop and ambient animation (fires, portal, smoke, night).
+// Canvas, resize handling, render loop and ambient animation (water, foam, smoke, night).
 import type { Store } from "../store";
+import { U, drawStrip, whenLoaded } from "./art";
 import { type Sprite, canvas } from "./pix";
 import { Sim } from "./sim";
-import { type Layout, makeLayout, paintWorld } from "./world";
+import { DUST } from "./sprites";
+import { type Layout, WATER, drawFoam, makeLayout, paintLand } from "./world";
 
 interface Smoke {
   x: number;
@@ -12,7 +14,7 @@ interface Smoke {
 
 function glowSprite(r: number, color: string): Sprite {
   const [c, g] = canvas(r * 2 + 1, r * 2 + 1);
-  // three stepped discs rather than a smooth gradient, to stay in pixel style
+  // three stepped discs rather than a smooth gradient
   for (const [k, a] of [[1, 0.1], [0.66, 0.12], [0.36, 0.16]]) {
     const rad = Math.round(r * k);
     g.fillStyle = `rgba(${color},${a})`;
@@ -24,9 +26,12 @@ function glowSprite(r: number, color: string): Sprite {
   return c;
 }
 
+/** Radius, in world units, of the light each hero carries. */
+const HERO_GLOW = 26;
+
 function nightFactor(): number {
   const q = new URLSearchParams(location.search).get("night");
-  if (q !== null) return Math.max(0, Math.min(1, Number(q) || 1));
+  if (q !== null) return q === "" || Number.isNaN(Number(q)) ? 1 : Math.max(0, Math.min(1, Number(q)));
   const d = new Date();
   const h = d.getHours() + d.getMinutes() / 60;
   if (h < 5) return 1;
@@ -42,9 +47,13 @@ export class Game {
   onSelect: (id: string | null) => void = () => {};
   private g: CanvasRenderingContext2D;
   private L!: Layout;
-  private bg!: Sprite;
+  private land!: Sprite;
   private glows: Sprite[] = [];
-  private scale = 1;
+  private heroGlow = glowSprite(HERO_GLOW, "255,214,140");
+  /** device pixels per world unit (always a whole number) and CSS pixels per world unit */
+  private s = 4;
+  private unitCss = 4;
+  private smooth = false;
   private last = 0;
   private t = 0;
   private smoke: Smoke[] = [];
@@ -60,6 +69,7 @@ export class Game {
     root.appendChild(this.el);
     this.layout();
     this.sim = new Sim(this.L);
+    void whenLoaded("tiles").then(() => (this.land = paintLand(this.L)));
     // Wait for the first snapshot so heroes already at work start on the field, not at the portal.
     const sync = () => store.ready && this.sim.sync(store.agents, store.now());
     sync();
@@ -80,7 +90,7 @@ export class Game {
     }).observe(root);
     this.el.addEventListener("pointerdown", (e) => {
       const r = this.el.getBoundingClientRect();
-      const id = this.sim.pick((e.clientX - r.left) / this.scale, (e.clientY - r.top) / this.scale);
+      const id = this.sim.pick((e.clientX - r.left) / this.unitCss, (e.clientY - r.top) / this.unitCss);
       this.select(id);
       this.onSelect(id);
     });
@@ -95,16 +105,21 @@ export class Game {
   private layout(): void {
     const w = Math.max(160, this.root.clientWidth);
     const h = Math.max(160, this.root.clientHeight);
-    this.scale = Math.max(1, Math.round(Math.min(w, h) / 250));
-    const W = Math.ceil(w / this.scale);
-    const H = Math.ceil(h / this.scale);
-    this.el.width = W;
-    this.el.height = H;
-    this.el.style.width = `${W * this.scale}px`;
-    this.el.style.height = `${H * this.scale}px`;
-    this.g.imageSmoothingEnabled = false;
+    const dpr = window.devicePixelRatio || 1;
+    // Aim for about 270 world units on the short side, with the art scaled in quarter steps
+    // so that one world unit is always a whole number of device pixels.
+    const zoom = Math.max(0.25, Math.round(((Math.min(w, h) / 270) * dpr * 4) / U) / 4);
+    this.s = zoom * U;
+    this.unitCss = this.s / dpr;
+    this.smooth = zoom % 1 !== 0;
+    const W = Math.ceil(w / this.unitCss);
+    const H = Math.ceil(h / this.unitCss);
+    this.el.width = Math.round(w * dpr);
+    this.el.height = Math.round(h * dpr);
+    this.el.style.width = `${w}px`;
+    this.el.style.height = `${h}px`;
     this.L = makeLayout(W, H);
-    this.bg = paintWorld(this.L);
+    this.land = paintLand(this.L);
     this.glows = this.L.glows.map((gl) => glowSprite(gl.r, gl.color));
     this.smoke = [];
   }
@@ -120,52 +135,41 @@ export class Game {
 
   private draw(dt: number): void {
     const g = this.g;
-    const { L, t } = this;
+    const { L, t, s } = this;
     const sh = this.sim.shake;
-    g.setTransform(1, 0, 0, 1, sh ? Math.round((Math.random() - 0.5) * sh) : 0, sh ? Math.round((Math.random() - 0.5) * sh) : 0);
-    g.drawImage(this.bg, 0, 0);
+    const jx = sh ? Math.round((Math.random() - 0.5) * sh) : 0;
+    const jy = sh ? Math.round((Math.random() - 0.5) * sh) : 0;
+    g.setTransform(s, 0, 0, s, jx * s, jy * s);
+    g.imageSmoothingEnabled = this.smooth;
+    g.imageSmoothingQuality = "high";
 
-    // portal swirl inside the keep doorway
-    const p = L.portal;
-    for (let i = 0; i < 14; i++) {
-      const a = t * 2.2 + i * 0.9;
-      const rad = 1 + (i % 7);
-      g.fillStyle = i % 3 === 0 ? "#f0d8ff" : i % 3 === 1 ? "#b46cff" : "#7a3fb8";
-      g.fillRect(Math.round(p.x + Math.cos(a) * rad), Math.round(p.y - 7 + Math.sin(a) * rad * 1.3), 1, 1);
-    }
+    g.fillStyle = WATER;
+    g.fillRect(-4, -4, L.W + 8, L.H + 8);
+    drawFoam(g, L, t);
+    g.drawImage(this.land, 0, 0, L.W, L.H);
+    for (const p of L.afloat) p.draw(g, t);
 
-    // flames
-    for (const f of L.flames) {
-      const k = Math.floor(t * 9 + f.x) % 3;
-      g.fillStyle = "#e0483c";
-      g.fillRect(f.x - 2, f.y - 1, 4, 3);
-      g.fillStyle = "#ff9d3c";
-      g.fillRect(f.x - 1, f.y - 3 - (k === 0 ? 1 : 0), 2, 4);
-      g.fillStyle = "#ffe07a";
-      g.fillRect(f.x - (k === 1 ? 1 : 0), f.y - 2, 1, 2);
-    }
+    this.sim.draw(g, L.props, s);
 
     // chimney smoke
-    if (Math.random() < dt * 2.2 && L.chimneys.length) {
+    if (Math.random() < dt * 1.6 && L.chimneys.length) {
       const c = L.chimneys[(Math.random() * L.chimneys.length) | 0];
       this.smoke.push({ x: c.x, y: c.y, life: 0 });
     }
-    for (const s of this.smoke) {
-      s.life += dt;
-      s.y -= dt * 6;
-      s.x += Math.sin(s.life * 2 + s.y) * dt * 3;
-      g.globalAlpha = Math.max(0, 0.55 - s.life * 0.2);
-      g.fillStyle = "#d9dde6";
-      const sz = s.life > 1.2 ? 3 : 2;
-      g.fillRect(Math.round(s.x), Math.round(s.y), sz, sz);
+    for (const p of this.smoke) {
+      p.life += dt;
+      p.y -= dt * 5;
+      p.x += Math.sin(p.life * 2 + p.y) * dt * 2;
+      g.globalAlpha = Math.max(0, 0.6 - p.life * 0.22);
+      drawStrip(g, DUST, 2 + p.life * 2.6, p.x, p.y, { scale: 0.4 + p.life * 0.12 });
     }
     g.globalAlpha = 1;
-    this.smoke = this.smoke.filter((s) => s.life < 2.6 && s.y > -4);
+    this.smoke = this.smoke.filter((p) => p.life < 2.6);
 
-    this.sim.draw(g);
 
     // night tint, then lights on top
-    g.setTransform(1, 0, 0, 1, 0, 0);
+    g.setTransform(s, 0, 0, s, 0, 0);
+    g.imageSmoothingEnabled = false;
     if (this.night > 0) {
       g.fillStyle = `rgba(14,18,58,${0.5 * this.night})`;
       g.fillRect(0, 0, L.W, L.H);
@@ -178,6 +182,12 @@ export class Game {
       g.globalAlpha = a;
       g.drawImage(this.glows[i], gl.x - gl.r, gl.y - gl.r);
     });
+    // each hero carries a warm light: faint by day, a lantern at night
+    for (const h of this.sim.heroes.values()) {
+      const a = (0.22 + 0.7 * this.night) * (h.a.status === "stale" ? 0.4 : 1) * (0.93 + 0.07 * Math.sin(t * 5 + h.x));
+      g.globalAlpha = a;
+      g.drawImage(this.heroGlow, h.x - HERO_GLOW, h.y - 9 - HERO_GLOW);
+    }
     g.globalAlpha = 1;
     g.globalCompositeOperation = "source-over";
   }

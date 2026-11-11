@@ -4,6 +4,7 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
+    "art": "node scripts/import-art.mjs",
     "build": "vite build",
     "dev": "vite build && wrangler dev",
     "watch": "vite build --watch",

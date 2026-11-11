@@ -2,7 +2,8 @@ import type { AgentState } from "../../shared/protocol";
 import { ago, el } from "./dom";
 import type { Game } from "./game/game";
 import { hash } from "./game/pix";
-import { CLASS_LABEL, CLASS_OF, heroSprites } from "./game/sprites";
+import { img, loaded } from "./game/art";
+import { CLASS_LABEL, CLASS_OF, PC_COLORS, heroSprites } from "./game/sprites";
 import type { Store } from "./store";
 
 const VERB: Record<string, string> = {
@@ -80,9 +81,11 @@ export class Hud {
 
     const now = this.store.now();
     const rows = list.map((a) => {
-      const cls = CLASS_OF[a.agent] ?? "squire";
-      const icon = el("canvas", { width: 16, height: 16 });
-      icon.getContext("2d")!.drawImage(heroSprites(a.agent, hash(a.pcId) % 8).walk[0][0], 0, 0);
+      const cls = CLASS_OF[a.agent] ?? "warrior";
+      const icon = el("canvas", { width: 64, height: 64 });
+      // crop of the first idle frame
+      const portrait = img(heroSprites(a.agent, hash(a.pcId) % PC_COLORS.length).idle.name);
+      if (loaded(portrait)) icon.getContext("2d")!.drawImage(portrait, 52, 48, 92, 92, 0, 0, 64, 64);
       const row = el(
         "button",
         { class: `hero${a.id === this.selected ? " sel" : ""}` },

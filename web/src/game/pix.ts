@@ -1,4 +1,4 @@
-// Pixel helpers: bake palette-indexed grids into canvases, a 3x5 bitmap font, seeded RNG.
+// Pixel helpers: bake palette-indexed grids into canvases (overlay marks), a 3x5 bitmap font, seeded RNG.
 
 export type Sprite = HTMLCanvasElement;
 export type Palette = Record<string, string>;
@@ -24,33 +24,6 @@ export function bake(rows: string[], pal: Palette, scale = 1): Sprite {
       g.fillRect(x * scale, y * scale, scale, scale);
     }
   });
-  return c;
-}
-
-export function flipX(s: Sprite): Sprite {
-  const [c, g] = canvas(s.width, s.height);
-  g.translate(s.width, 0);
-  g.scale(-1, 1);
-  g.drawImage(s, 0, 0);
-  return c;
-}
-
-/** Rotate 90 degrees clockwise. */
-export function rotate(s: Sprite): Sprite {
-  const [c, g] = canvas(s.height, s.width);
-  g.translate(s.height, 0);
-  g.rotate(Math.PI / 2);
-  g.drawImage(s, 0, 0);
-  return c;
-}
-
-/** A solid single-colour copy, used for hit flashes. */
-export function silhouette(s: Sprite, color: string): Sprite {
-  const [c, g] = canvas(s.width, s.height);
-  g.drawImage(s, 0, 0);
-  g.globalCompositeOperation = "source-in";
-  g.fillStyle = color;
-  g.fillRect(0, 0, s.width, s.height);
   return c;
 }
 
@@ -113,10 +86,4 @@ export function textSprite(text: string, color: string, outline = "#1b1622"): Sp
   textCache.set(key, c);
   s = c;
   return s;
-}
-
-/** Draw text horizontally centred on cx. */
-export function drawText(g: CanvasRenderingContext2D, text: string, cx: number, y: number, color: string): void {
-  const s = textSprite(text, color);
-  g.drawImage(s, Math.round(cx - s.width / 2), Math.round(y));
 }

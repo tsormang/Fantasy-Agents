@@ -1,11 +1,27 @@
 // Cosmetic battle simulation: heroes mirror agent state, enemies exist to be fought.
 import type { Activity, AgentState } from "../../../shared/protocol";
-import { type Sprite, drawText, hash } from "./pix";
-import { BUBBLE, CLASS_OF, type CharSprites, type EnemyKind, type HeroClass, WISP, enemySprites, heroSprites } from "./sprites";
-import type { Layout, Pt } from "./world";
+import { type Strip, drawStrip, frameCount } from "./art";
+import { type Sprite, hash, textSprite } from "./pix";
+import {
+  ARROW,
+  BOOM,
+  BUBBLE,
+  CLASS_OF,
+  type CharSprites,
+  DUST,
+  type EnemyKind,
+  type HeroClass,
+  PC_COLORS,
+  WISP,
+  enemySprites,
+  heroSprites,
+} from "./sprites";
+import type { Layout, Prop, Pt } from "./world";
 
 const BOSS_AFTER_MS = 10 * 60_000;
-const RANGED: Record<HeroClass, boolean> = { mage: true, ranger: true, barbarian: false, squire: false };
+const RANGED: Record<HeroClass, boolean> = { monk: true, archer: true, warrior: false };
+/** Height above the feet of the middle of a figure, where blows land. */
+const MID = 10;
 
 interface Hero {
   id: string;
@@ -21,7 +37,12 @@ interface Hero {
   facing: 1 | -1;
   moving: boolean;
   walkT: number;
-  strikeT: number;
+  /** time left in the current attack animation, and which attack strip is playing */
+  atkT: number;
+  atkIdx: number;
+  /** the blow that lands part-way through the attack animation */
+  pending: { target: Enemy; act: Activity | null } | null;
+  phase: number;
   cooldown: number;
   spawnT: number;
   wanderT: number;
@@ -43,9 +64,19 @@ interface Enemy {
   facing: 1 | -1;
   walkT: number;
   flashT: number;
-  lungeT: number;
+  atkT: number;
   cooldown: number;
   life: number;
+}
+
+/** A one-shot animated effect from a sprite strip. */
+interface Fx {
+  s: Strip;
+  x: number;
+  y: number;
+  t: number;
+  dur: number;
+  scale: number;
 }
 
 interface Particle {
@@ -86,6 +117,7 @@ export class Sim {
   particles: Particle[] = [];
   rings: Ring[] = [];
   shots: Shot[] = [];
+  fx: Fx[] = [];
   shake = 0;
   selected: string | null = null;
   private first = true;
@@ -116,7 +148,8 @@ export class Sim {
   sync(agents: Map<string, AgentState>, now: number): void {
     for (const [id, h] of this.heroes) {
       if (!agents.has(id)) {
-        this.poof(h.x, h.y - 8, "#b46cff", 14);
+        this.puff(h.x, h.y);
+        this.poof(h.x, h.y - MID, "#b46cff", 10);
         this.heroes.delete(id);
       }
     }
@@ -128,8 +161,8 @@ export class Sim {
         h = {
           id: a.id,
           a,
-          cls: CLASS_OF[a.agent] ?? "squire",
-          spr: heroSprites(a.agent, hash(a.pcId) % 8),
+          cls: CLASS_OF[a.agent] ?? "warrior",
+          spr: heroSprites(a.agent, hash(a.pcId) % PC_COLORS.length),
           x: start.x,
           y: start.y,
           path: [],
@@ -139,7 +172,10 @@ export class Sim {
           facing: 1,
           moving: false,
           walkT: 0,
-          strikeT: 0,
+          atkT: 0,
+          atkIdx: 0,
+          pending: null,
+          phase: Math.random() * 8,
           cooldown: 0.5,
           spawnT: 0.3,
           wanderT: 1 + Math.random() * 3,
@@ -148,7 +184,7 @@ export class Sim {
           seenKills: a.kills,
         };
         this.heroes.set(a.id, h);
-        if (!this.first) this.poof(h.x, h.y - 8, "#b46cff", 14);
+        if (!this.first) this.poof(h.x, h.y - MID, "#b46cff", 14);
         if (!this.first && !busy(a)) h.path = [home];
       } else {
         if (a.kills > h.seenKills && a.activity) {
@@ -201,9 +237,7 @@ export class Sim {
   }
 
   private route(h: Hero): void {
-    const { gate, vh } = this.L;
-    const inside = { x: gate.x, y: vh - 8 };
-    const outside = { x: gate.x, y: vh + 12 };
+    const { gateIn: inside, gateOut: outside, vh } = this.L;
     const inVillage = h.y < vh;
     if (h.inField) h.path = inVillage ? [inside, outside, h.slot] : [h.slot];
     else h.path = inVillage ? [h.home] : [outside, inside, h.home];
@@ -216,7 +250,8 @@ export class Sim {
     this.shake = Math.max(0, this.shake - dt * 12);
 
     for (const h of this.heroes.values()) {
-      h.strikeT = Math.max(0, h.strikeT - dt);
+      h.atkT = Math.max(0, h.atkT - dt);
+      if (h.pending && h.atkT <= h.spr.attackTime * (1 - h.spr.release)) this.release(h);
       h.wispT = Math.max(0, h.wispT - dt);
       h.moving = false;
       if (h.path.length) {
@@ -256,6 +291,21 @@ export class Sim {
     this.particles = this.particles.filter((p) => p.life > 0);
     for (const r of this.rings) r.life -= dt;
     this.rings = this.rings.filter((r) => r.life > 0);
+    for (const f of this.fx) f.t += dt;
+    this.fx = this.fx.filter((f) => f.t < f.dur);
+  }
+
+  /** The moment in an attack animation where the arrow leaves the bow or the sword connects. */
+  private release(h: Hero): void {
+    const { target, act } = h.pending!;
+    h.pending = null;
+    if (!this.enemies.includes(target)) return;
+    if (RANGED[h.cls]) {
+      this.shots.push({ x: h.x + h.facing * 6, y: h.y - MID - 2, target, from: h, arrow: h.cls === "archer", act });
+    } else {
+      this.slash(target.x, target.y - MID, h.facing);
+      this.hit(h, target, act);
+    }
   }
 
   private stepToward(o: { x: number; y: number; facing: 1 | -1 }, to: Pt, step: number): void {
@@ -296,24 +346,20 @@ export class Sim {
     if (!target) return;
     h.facing = target.x >= h.x ? 1 : -1;
     const ranged = RANGED[h.cls];
-    if (best > (ranged ? 120 : 24) || h.cooldown > 0) return;
+    if (best > (ranged ? 130 : 30) || h.cooldown > 0) return;
 
     const act = h.specials.shift() ?? null;
-    h.cooldown = (act ? 0.45 : h.a.activity === "think" ? 1.5 : 1.0) + Math.random() * 0.3;
-    h.strikeT = 0.22;
-    if (ranged) {
-      this.shots.push({ x: h.x + h.facing * 7, y: h.y - 10, target, from: h, arrow: h.cls === "ranger", act });
-    } else {
-      this.slash(target.x, target.y - 7, h.facing);
-      this.hit(h, target, act);
-    }
+    h.cooldown = (act ? 0.65 : h.a.activity === "think" ? 1.5 : 1.0) + Math.random() * 0.3;
+    h.atkT = h.spr.attackTime;
+    h.atkIdx = (h.atkIdx + 1) % h.spr.attacks.length;
+    h.pending = { target, act };
   }
 
   private spawn(h: Hero, force: EnemyKind | null): void {
     const sp = this.L.spawns;
     const order = sp.map((p, i) => ({ i, d: dist(p, h) + Math.random() * 120 })).sort((a, b) => a.d - b.d);
     const idx = order[0].i;
-    const kind: EnemyKind = force ?? (idx === 0 ? "skeleton" : idx === 1 ? "goblin" : Math.random() < 0.6 ? "goblin" : "skeleton");
+    const kind: EnemyKind = force ?? (idx === 0 ? "lancer" : idx === 1 ? "raider" : Math.random() < 0.6 ? "raider" : "lancer");
     const p = sp[idx];
     this.enemies.push({
       owner: h.id,
@@ -321,14 +367,14 @@ export class Sim {
       spr: enemySprites(kind),
       x: p.x + (Math.random() - 0.5) * 6,
       y: p.y + (Math.random() - 0.5) * 6,
-      hp: kind === "boss" ? 1e9 : kind === "skeleton" ? 3 : 2,
+      hp: kind === "boss" ? 1e9 : kind === "lancer" ? 3 : 2,
       angle: Math.random() * Math.PI * 2,
       state: "approach",
       fleeTo: p,
       facing: 1,
       walkT: Math.random(),
       flashT: 0,
-      lungeT: 0,
+      atkT: 0,
       cooldown: 1 + Math.random(),
       life: 0,
     });
@@ -339,14 +385,14 @@ export class Sim {
     for (const e of this.enemies) {
       e.life += dt;
       e.flashT = Math.max(0, e.flashT - dt);
-      e.lungeT = Math.max(0, e.lungeT - dt);
+      e.atkT = Math.max(0, e.atkT - dt);
       const h = this.heroes.get(e.owner);
       const wanted = h && h.inField && (h.a.status === "working" || h.a.status === "waiting");
       if (!wanted && e.state !== "flee") {
         e.state = "flee";
         e.fleeTo = this.L.spawns.reduce((a, b) => (dist(b, e) < dist(a, e) ? b : a));
       }
-      const base = e.kind === "goblin" ? 30 : e.kind === "skeleton" ? 21 : 16;
+      const base = e.kind === "raider" ? 32 : e.kind === "lancer" ? 24 : 18;
       if (e.state === "flee") {
         this.stepToward(e, e.fleeTo, base * 2.4 * dt);
         e.walkT += dt * 2;
@@ -356,7 +402,7 @@ export class Sim {
       }
       const waiting = h!.a.status === "waiting";
       if (waiting) e.angle += dt * 0.9;
-      const reach = (e.kind === "boss" ? 24 : 15) + (waiting ? 12 : 0);
+      const reach = (e.kind === "boss" ? 30 : 19) + (waiting ? 12 : 0);
       const goal = { x: h!.x + Math.cos(e.angle) * reach, y: h!.y + Math.sin(e.angle) * reach * 0.6 };
       const d = dist(e, goal);
       if (d > 1.5) {
@@ -369,7 +415,7 @@ export class Sim {
         e.cooldown -= dt;
         if (e.cooldown <= 0 && !waiting) {
           e.cooldown = 1.1 + Math.random() * 0.9;
-          e.lungeT = 0.2;
+          e.atkT = e.spr.attackTime;
         }
       }
       keep.push(e);
@@ -381,7 +427,7 @@ export class Sim {
     const keep: Shot[] = [];
     for (const s of this.shots) {
       if (!this.enemies.includes(s.target)) continue;
-      const to = { x: s.target.x, y: s.target.y - 7 };
+      const to = { x: s.target.x, y: s.target.y - MID };
       const d = dist(s, to);
       const step = 190 * dt;
       if (d <= step + 2) {
@@ -390,7 +436,7 @@ export class Sim {
       }
       s.x += ((to.x - s.x) / d) * step;
       s.y += ((to.y - s.y) / d) * step;
-      if (!s.arrow) this.spark(s.x, s.y, "#ff9d3c", 1, 10);
+      if (!s.arrow) this.spark(s.x, s.y, "#b9f06a", 1, 10);
       keep.push(s);
     }
     this.shots = keep;
@@ -406,7 +452,7 @@ export class Sim {
       e.y += (dy / d) * 2;
     }
     const x = e.x;
-    const y = e.y - 7;
+    const y = e.y - MID;
     switch (act) {
       case "edit":
         this.spark(x, y, "#ffd23c", 7, 60);
@@ -414,6 +460,7 @@ export class Sim {
       case "command":
         this.rings.push({ x, y: e.y, life: 0.35, max: 0.35, r: 20, color: "#ff9d3c" });
         this.spark(x, y, "#ff9d3c", 6, 70);
+        this.fx.push({ s: BOOM, x, y, t: 0, dur: 0.6, scale: 1 });
         this.shake = 3;
         break;
       case "search":
@@ -434,7 +481,7 @@ export class Sim {
     }
     e.hp -= act ? 99 : 1;
     if (e.hp <= 0) {
-      this.poof(e.x, e.y - 6, e.kind === "skeleton" ? "#e6e0cc" : "#8fd05a", 10);
+      this.puff(e.x, e.y);
       this.enemies = this.enemies.filter((o) => o !== e);
     }
   }
@@ -459,6 +506,10 @@ export class Sim {
     }
   }
 
+  private puff(x: number, y: number): void {
+    this.fx.push({ s: DUST, x, y: y - 4, t: 0, dur: 0.7, scale: 1 });
+  }
+
   private slash(x: number, y: number, dir: number): void {
     for (let i = 0; i < 6; i++) {
       const a = -1 + i * 0.4;
@@ -469,12 +520,21 @@ export class Sim {
 
   // ------------------------------------------------------------------ draw
 
-  draw(g: CanvasRenderingContext2D): void {
-    type Item = { y: number; hero?: Hero; enemy?: Enemy };
-    const items: Item[] = [];
+  /** `px` is device pixels per world unit, used to keep the chunky overlays on whole pixels. */
+  draw(g: CanvasRenderingContext2D, props: Prop[], px: number): void {
+    type Item = { y: number; hero?: Hero; enemy?: Enemy; prop?: Prop };
+    const items: Item[] = props.map((prop) => ({ y: prop.y, prop }));
     for (const h of this.heroes.values()) items.push({ y: h.y, hero: h });
     for (const e of this.enemies) items.push({ y: e.y, enemy: e });
     items.sort((a, b) => a.y - b.y);
+    const smooth = g.imageSmoothingEnabled;
+    const snap = (v: number) => Math.round(v * px) / px;
+
+    for (const it of items) {
+      if (it.hero) this.drawHero(g, it.hero, snap);
+      else if (it.enemy) this.drawEnemy(g, it.enemy);
+      else it.prop!.draw(g, this.t);
+    }
 
     for (const r of this.rings) {
       const k = 1 - r.life / r.max;
@@ -489,105 +549,94 @@ export class Sim {
       g.globalAlpha = 1;
     }
 
-    for (const it of items) {
-      if (it.hero) this.drawHero(g, it.hero);
-      else this.drawEnemy(g, it.enemy!);
-    }
+    for (const f of this.fx) drawStrip(g, f.s, (f.t / f.dur) * frameCount(f.s), f.x, f.y, { scale: f.scale });
 
     for (const s of this.shots) {
       if (s.arrow) {
-        const to = s.target;
-        const d = Math.hypot(to.x - s.x, to.y - 7 - s.y) || 1;
-        const ux = (to.x - s.x) / d;
-        const uy = (to.y - 7 - s.y) / d;
-        for (let i = 0; i < 5; i++) {
-          g.fillStyle = i === 4 ? "#dfe5ee" : "#8a5a34";
-          g.fillRect(Math.round(s.x - ux * (4 - i)), Math.round(s.y - uy * (4 - i)), 1, 1);
-        }
+        drawStrip(g, ARROW, 0, s.x, s.y, { rot: Math.atan2(s.target.y - MID - s.y, s.target.x - s.x) });
       } else {
-        g.fillStyle = "#ffd23c";
-        g.fillRect(Math.round(s.x) - 1, Math.round(s.y) - 1, 3, 3);
-        g.fillStyle = "#fff6d0";
-        g.fillRect(Math.round(s.x), Math.round(s.y), 1, 1);
+        g.fillStyle = "#b9f06a";
+        g.fillRect(snap(s.x - 1.5), snap(s.y - 1.5), 3, 3);
+        g.fillStyle = "#f6ffe0";
+        g.fillRect(snap(s.x - 0.5), snap(s.y - 0.5), 1, 1);
       }
     }
 
     for (const p of this.particles) {
       g.globalAlpha = Math.min(1, (p.life / p.max) * 1.6);
       g.fillStyle = p.color;
-      g.fillRect(Math.round(p.x), Math.round(p.y), p.size, p.size);
+      g.fillRect(snap(p.x), snap(p.y), p.size, p.size);
     }
     g.globalAlpha = 1;
 
-    for (const h of this.heroes.values()) this.drawLabel(g, h);
+    g.imageSmoothingEnabled = false;
+    for (const h of this.heroes.values()) this.drawLabel(g, h, snap);
+    g.imageSmoothingEnabled = smooth;
   }
 
   private drawChar(
     g: CanvasRenderingContext2D,
     spr: CharSprites,
-    x: number,
-    y: number,
-    facing: 1 | -1,
-    frame: number,
+    o: { x: number; y: number; facing: 1 | -1; walkT: number; atkT: number },
+    atkIdx: number,
+    moving: boolean,
+    phase: number,
     flash: boolean,
-    striking: boolean,
-    shadowW: number,
   ): void {
-    const di = facing > 0 ? 0 : 1;
-    const sx = Math.round(x - spr.w / 2);
-    const sy = Math.round(y - spr.h + 1) - (frame ? 1 : 0);
-    g.fillStyle = "rgba(15,20,15,0.3)";
-    g.fillRect(Math.round(x - shadowW / 2), Math.round(y), shadowW, 2);
-    g.drawImage(flash ? spr.flash[di] : spr.walk[frame][di], sx, sy);
-    const k = spr.w / 16;
-    const wpn = striking ? spr.weapon.strike[di] : spr.weapon.rest[di];
-    const wx = striking ? (facing > 0 ? x + 3 * k : x - 3 * k - wpn.width) : facing > 0 ? x + 4 * k : x - 4 * k - wpn.width;
-    const wy = striking ? y - 7 * k : y - 4 * k - wpn.height + 1;
-    g.drawImage(wpn, Math.round(wx), Math.round(wy) - (frame ? 1 : 0));
+    let s = spr.idle;
+    let frame = this.t * 10 + phase;
+    if (o.atkT > 0) {
+      s = spr.attacks[atkIdx % spr.attacks.length];
+      frame = Math.min(0.999, 1 - o.atkT / spr.attackTime) * frameCount(s);
+    } else if (moving) {
+      s = spr.run;
+      frame = o.walkT * 10;
+    }
+    drawStrip(g, s, frame, o.x, o.y, { flip: o.facing < 0, scale: spr.scale, flash });
   }
 
-  private drawHero(g: CanvasRenderingContext2D, h: Hero): void {
-    const frame = h.moving ? Math.floor(h.walkT * 8) % 2 : Math.sin(this.t * 2 + h.x) > 0.7 ? 1 : 0;
-    if (h.a.status === "stale") g.globalAlpha = 0.45;
+  private drawHero(g: CanvasRenderingContext2D, h: Hero, snap: (v: number) => number): void {
     if (this.selected === h.id) {
       g.fillStyle = "#ffe9a8";
-      for (let i = 0; i < 16; i++) {
-        const a = (i / 16) * Math.PI * 2 + this.t * 2;
-        g.fillRect(Math.round(h.x + Math.cos(a) * 9), Math.round(h.y + Math.sin(a) * 4), 1, 1);
+      for (let i = 0; i < 20; i++) {
+        const a = (i / 20) * Math.PI * 2 + this.t * 2;
+        g.fillRect(snap(h.x + Math.cos(a) * 13), snap(h.y - 1 + Math.sin(a) * 6), 1, 1);
       }
     }
-    this.drawChar(g, h.spr, h.x, h.y, h.facing, frame, false, h.strikeT > 0, 10);
+    if (h.a.status === "stale") g.globalAlpha = 0.45;
+    this.drawChar(g, h.spr, h, h.atkIdx, h.moving, h.phase, false);
     g.globalAlpha = 1;
     if (h.wispT > 0) {
       const a = this.t * 3;
-      g.drawImage(this.wisp, Math.round(h.x + Math.cos(a) * 11) - 2, Math.round(h.y - 12 + Math.sin(a) * 4));
+      const smooth = g.imageSmoothingEnabled;
+      g.imageSmoothingEnabled = false;
+      g.drawImage(this.wisp, snap(h.x + Math.cos(a) * 14 - 2), snap(h.y - 14 + Math.sin(a) * 5));
+      g.imageSmoothingEnabled = smooth;
     }
   }
 
   private drawEnemy(g: CanvasRenderingContext2D, e: Enemy): void {
-    const moving = e.state !== "fight";
-    const frame = moving ? Math.floor(e.walkT * 7) % 2 : 0;
-    const lunge = e.lungeT > 0 ? e.facing * 3 : 0;
     if (e.life < 0.4) g.globalAlpha = e.life / 0.4;
-    this.drawChar(g, e.spr, e.x + lunge, e.y, e.facing, frame, e.flashT > 0, e.lungeT > 0, e.kind === "boss" ? 20 : 10);
+    this.drawChar(g, e.spr, e, 0, e.state !== "fight", e.life * 3, e.flashT > 0);
     g.globalAlpha = 1;
   }
 
-  private drawLabel(g: CanvasRenderingContext2D, h: Hero): void {
-    const top = Math.round(h.y - h.spr.h - 7);
+  private drawLabel(g: CanvasRenderingContext2D, h: Hero, snap: (v: number) => number): void {
+    const top = h.y - h.spr.h - 9;
     const name = (h.a.project || h.a.pc).slice(0, 14);
-    drawText(g, name, h.x, top, LABEL[h.a.status]);
+    const s = textSprite(name, LABEL[h.a.status]);
+    g.drawImage(s, snap(h.x - s.width / 2), snap(top));
     if (h.a.status === "waiting") {
       const bob = Math.sin(this.t * 5) > 0 ? 1 : 0;
-      g.drawImage(this.bubble, Math.round(h.x - 3), top - 12 - bob);
+      g.drawImage(this.bubble, snap(h.x - 3), snap(top - 12 - bob));
     }
   }
 
   pick(x: number, y: number): string | null {
     let best: string | null = null;
-    let bd = 14;
+    let bd = 16;
     for (const h of this.heroes.values()) {
-      const d = Math.hypot(h.x - x, h.y - 8 - y);
+      const d = Math.hypot(h.x - x, h.y - MID - y);
       if (d < bd) {
         bd = d;
         best = h.id;
