@@ -1,6 +1,6 @@
 // Cosmetic battle simulation: heroes mirror agent state, enemies exist to be fought.
 import type { Activity, AgentState } from "../../../shared/protocol";
-import { type Strip, drawStrip, frameCount } from "./art";
+import { type Strip, U, drawStrip, frameCount, img, loaded } from "./art";
 import { type Sprite, hash, textSprite } from "./pix";
 import {
   ARROW,
@@ -28,6 +28,8 @@ interface Hero {
   a: AgentState;
   cls: HeroClass;
   spr: CharSprites;
+  /** index into PC_COLORS */
+  color: number;
   x: number;
   y: number;
   path: Pt[];
@@ -109,6 +111,11 @@ interface Shot {
 
 const busy = (a: AgentState) => a.status !== "idle";
 const dist = (a: Pt, b: Pt) => Math.hypot(a.x - b.x, a.y - b.y);
+/** Name ribbons: drawn at this scale from the pack's small ribbons, one pair of 64px rows per faction colour. */
+const RIBBON = 0.56;
+const LABEL_FONT = '700 5px ui-monospace, "Cascadia Mono", Consolas, Menlo, monospace';
+/** Ink that reads on each faction's ribbon (blue, red, yellow, purple). */
+const RIBBON_INK = ["#ffffff", "#ffffff", "#3a2d2a", "#ffffff"];
 const LABEL: Record<string, string> = { working: "#ffe9a8", waiting: "#ff9a80", idle: "#d8e6f4", stale: "#9aa3ad" };
 
 export class Sim {
@@ -163,6 +170,7 @@ export class Sim {
           a,
           cls: CLASS_OF[a.agent] ?? "warrior",
           spr: heroSprites(a.agent, hash(a.pcId) % PC_COLORS.length),
+          color: hash(a.pcId) % PC_COLORS.length,
           x: start.x,
           y: start.y,
           path: [],
@@ -622,13 +630,61 @@ export class Sim {
   }
 
   private drawLabel(g: CanvasRenderingContext2D, h: Hero, snap: (v: number) => number): void {
-    const top = h.y - h.spr.h - 9;
     const name = (h.a.project || h.a.pc).slice(0, 14);
-    const s = textSprite(name, LABEL[h.a.status]);
-    g.drawImage(s, snap(h.x - s.width / 2), snap(top));
+    const ribbons = img("ui_ribbons_small");
+    let top = h.y - h.spr.h - 9;
+    if (!loaded(ribbons)) {
+      // without the pack's ribbons, fall back to outlined pixel text
+      const s = textSprite(name, LABEL[h.a.status]);
+      g.drawImage(s, snap(h.x - s.width / 2), snap(top));
+    } else {
+      // a ribbon in the PC's faction colour: two end caps and a middle stretched to fit the name
+      const k = RIBBON / U;
+      const cap = 64 * k;
+      top = h.y - h.spr.h - cap - 1;
+      g.font = LABEL_FONT;
+      const mid = Math.max(1, g.measureText(name).width - cap * 0.75);
+      const x0 = snap(h.x - mid / 2 - cap);
+      const y0 = snap(top);
+      const row = h.color * 128;
+      g.imageSmoothingEnabled = true;
+      g.globalAlpha = h.a.status === "stale" ? 0.5 : 1;
+      g.drawImage(ribbons, 0, row, 64, 64, x0, y0, cap, cap);
+      // overlap the joins slightly so no seam shows at fractional zoom
+      g.drawImage(ribbons, 128, row, 64, 64, x0 + cap - 0.2, y0, mid + 0.4, cap);
+      g.drawImage(ribbons, 256, row, 64, 64, x0 + cap + mid, y0, cap, cap);
+      g.imageSmoothingEnabled = false;
+      g.textAlign = "center";
+      g.textBaseline = "middle";
+      const ink = RIBBON_INK[h.color] ?? "#ffffff";
+      if (ink === "#ffffff") {
+        g.fillStyle = "rgba(20,40,60,0.7)";
+        g.fillText(name, h.x, y0 + cap * 0.44 + 0.4);
+      }
+      g.fillStyle = ink;
+      g.fillText(name, h.x, y0 + cap * 0.44);
+      g.globalAlpha = 1;
+    }
     if (h.a.status === "waiting") {
       const bob = Math.sin(this.t * 5) > 0 ? 1 : 0;
-      g.drawImage(this.bubble, snap(h.x - 3), snap(top - 12 - bob));
+      const badge = img("ui_badge_red");
+      if (!loaded(badge)) {
+        g.drawImage(this.bubble, snap(h.x - 3), snap(top - 12 - bob));
+        return;
+      }
+      // the pack's red round button with an exclamation mark
+      const size = 10;
+      const by = snap(top - size - bob);
+      g.imageSmoothingEnabled = true;
+      g.drawImage(badge, snap(h.x - size / 2), by, size, size);
+      g.imageSmoothingEnabled = false;
+      g.font = '700 7px ui-monospace, "Cascadia Mono", Consolas, Menlo, monospace';
+      g.textAlign = "center";
+      g.textBaseline = "middle";
+      g.fillStyle = "rgba(90,20,20,0.8)";
+      g.fillText("!", h.x, by + size * 0.47 + 0.5);
+      g.fillStyle = "#ffffff";
+      g.fillText("!", h.x, by + size * 0.47);
     }
   }
 

@@ -47,17 +47,18 @@ export class Hud {
       this.roster.hidden = !this.roster.hidden;
       toggle.setAttribute("aria-expanded", String(!this.roster.hidden));
     };
-    root.append(
-      el(
-        "div",
-        { class: "topbar" },
-        el("div", { class: "title box" }, this.dot, el("b", { textContent: "FANTASY AGENTS" }), this.stats),
-        el("span", { class: "spacer" }),
-        ...actions,
-        toggle,
-      ),
-      this.roster,
+    const bar = el(
+      "div",
+      { class: "topbar" },
+      el("div", { class: "title box" }, this.dot, el("b", { textContent: "FANTASY AGENTS" }), this.stats),
+      ...actions,
+      toggle,
     );
+    root.append(bar, this.roster);
+    // The bar wraps onto a second row on narrow screens, so the roster hangs below wherever it ends.
+    const place = () => root.style.setProperty("--hud-top", `${bar.offsetTop + bar.offsetHeight}px`);
+    new ResizeObserver(place).observe(bar);
+    place();
     game.onSelect = (id) => {
       this.selected = id;
       if (id) this.roster.hidden = false;

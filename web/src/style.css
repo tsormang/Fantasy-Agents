@@ -141,10 +141,12 @@ a {
 
 .topbar {
   position: absolute;
-  top: 8px;
-  left: 8px;
-  right: 8px;
+  top: calc(8px + env(safe-area-inset-top, 0px));
+  left: calc(8px + env(safe-area-inset-left, 0px));
+  right: calc(8px + env(safe-area-inset-right, 0px));
   display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   gap: 8px;
   align-items: flex-start;
   pointer-events: none;
@@ -153,6 +155,7 @@ a {
   pointer-events: auto;
 }
 .title {
+  margin-right: auto;
   padding: 5px 10px;
   display: flex;
   gap: 10px;
@@ -173,16 +176,13 @@ a {
 .dot.on {
   background: var(--green);
 }
-.spacer {
-  flex: 1;
-}
-
+/* --hud-top is the bottom edge of the top bar, kept up to date by hud.ts */
 .roster {
   position: absolute;
-  right: 8px;
-  top: 48px;
+  right: calc(8px + env(safe-area-inset-right, 0px));
+  top: calc(var(--hud-top, 40px) + 8px);
   width: min(280px, calc(100vw - 16px));
-  max-height: calc(100% - 60px);
+  max-height: calc(100% - var(--hud-top, 40px) - 20px - env(safe-area-inset-bottom, 0px));
   overflow-y: auto;
   padding: 8px;
 }
@@ -513,8 +513,6 @@ ul.list li span {
 }
 
 .ts-ui .roster {
-  top: 56px;
-  max-height: calc(100% - 68px);
   padding: 0;
   scrollbar-color: var(--paper-edge) transparent;
 }
@@ -560,4 +558,23 @@ ul.list li span {
 .ts-ui .hero .what.waiting {
   color: #c0392b;
   font-weight: 700;
+}
+
+/* phones: tighter buttons so the signed-in top bar fits in two rows */
+@media (max-width: 560px) {
+  .topbar {
+    gap: 6px;
+  }
+  .topbar button,
+  .topbar .btn {
+    font-size: 11px;
+    letter-spacing: 0;
+    padding: 4px 7px;
+  }
+  .ts-ui .topbar button,
+  .ts-ui .topbar .btn {
+    border-width: 10px 9px 12px;
+    border-image-width: 10px 9px 12px;
+    padding: 0 2px;
+  }
 }

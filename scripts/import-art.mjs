@@ -107,6 +107,8 @@ Object.assign(files, {
   ui_button_red: `${ui}/Buttons/BigRedButton_Regular.png`,
   ui_button_quiet: `${ui}/Buttons/BigBlueButton_Pressed.png`,
   ui_ribbons: `${ui}/Ribbons/BigRibbons.png`,
+  ui_ribbons_small: `${ui}/Ribbons/SmallRibbons.png`,
+  ui_badge_red: `${ui}/Buttons/TinyRoundRedButton.png`,
 });
 ["blue", "red", "yellow", "purple"].forEach((color, c) => {
   for (const [cls, i] of [["warrior", 1], ["archer", 3], ["monk", 4]]) {
