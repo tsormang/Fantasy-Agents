@@ -167,19 +167,71 @@ export function updateCommand(base: string): string {
   );
 }
 
-const ALLOW_CMD = 'node "$HOME/.fantasy-agents/fa.mjs" allow';
-const ADD_CMD = 'node "$HOME/.fantasy-agents/fa.mjs" add';
+/** Encode paths as data so shell metacharacters, quotes and Unicode survive every supported shell. */
+export function projectsCommand(paths: string[]): string {
+  const encoded = btoa(Array.from(new TextEncoder().encode(JSON.stringify(paths)), (b) => String.fromCharCode(b)).join(""));
+  return `node -e "const f=require('path').join(require('os').homedir(),'.fantasy-agents','fa.mjs');const paths=JSON.parse(Buffer.from('${encoded}','base64').toString('utf8'));for(const p of paths){const r=require('child_process').spawnSync(process.execPath,[f,'allow',p],{stdio:'inherit'});if(r.error||r.status!==0)process.exit(r.status||1)}"`;
+}
+
+function projectFields(): HTMLElement {
+  const fields = el("div", {});
+  const command = el("code", { class: "cmd grow" });
+  const copy = copyButton(() => command.textContent || "");
+  const output = el("div", { class: "row project-command" }, command, copy);
+  const hint = el("p", { class: "dim", textContent: "Enter a project path above to generate your command." });
+  const inputs: HTMLInputElement[] = [];
+  const update = () => {
+    const paths = [...new Set(inputs.map((input) => input.value).filter((path) => path.trim()))];
+    command.textContent = paths.length ? projectsCommand(paths) : "";
+    output.hidden = !paths.length;
+    hint.hidden = !!paths.length;
+  };
+  const addField = (focus = true) => {
+    const input = el("input", { type: "text", placeholder: "C:\\Projects\\MyApp or /home/you/projects/my-app", autocomplete: "off", spellcheck: false });
+    const label = el("span", { textContent: `Project path ${inputs.length + 1}` });
+    const remove = el("button", { class: "quiet", type: "button", textContent: "Remove" });
+    const row = el("div", { class: "project-path" }, el("label", { class: "grow" }, label, input), remove);
+    inputs.push(input);
+    input.oninput = update;
+    remove.onclick = () => {
+      inputs.splice(inputs.indexOf(input), 1);
+      row.remove();
+      Array.from(fields.children).forEach((child, i) => { child.querySelector("span")!.textContent = `Project path ${i + 1}`; });
+      if (!inputs.length) addField();
+      update();
+    };
+    fields.append(row);
+    if (focus) input.focus();
+  };
+  const add = el("button", { class: "quiet", type: "button", textContent: "+ Add project path" });
+  add.onclick = () => addField();
+  addField(false);
+  update();
+  return el("div", { class: "project-setup" },
+    el("p", { textContent: "Choose the project folders agents can report from on this PC. Subfolders and git worktrees are included." }),
+    fields, el("p", {}, add), hint,
+    el("p", { textContent: "Copy and run the generated command in a terminal on this PC, then start a new agent session in an allowed folder and send a prompt." }),
+    output,
+    el("p", { class: "dim", textContent: "Paths stay in this dialog and are never sent to the server. Running the command saves the allowed folders on your PC; viewers see only the folder name. Adding a field here does not allow the folder until you run the command." }),
+  );
+}
 
 export async function connectModal(root: HTMLElement): Promise<void> {
   const intro = el("div", {});
   const pairBox = el("div", {});
   const devicesEl = el("ul", { class: "list" });
   const checklist = el("div", {});
+  const projectHost = el("div", {});
+  const selectedPC = el("p", { textContent: "Connect a PC in step 1 to continue." });
+  const projectPanels = new Map<string, HTMLElement>();
+  let selectedId: string | null = null;
   const close = el("button", { class: "quiet", textContent: "Close" });
   const modal = el(
     "div",
     { class: "modal" },
-    el("div", { class: "box" }, el("h1", { textContent: "Connect a PC" }), intro, pairBox, el("h2", { textContent: "Connected PCs" }), devicesEl, checklist, close),
+    el("div", { class: "box" }, el("h1", { textContent: "Connect" }),
+      el("section", { class: "connect-step" }, el("h2", { textContent: "Step 1: Connect PC" }), intro, pairBox, el("h3", { textContent: "Connected PCs" }), devicesEl),
+      el("section", { class: "connect-step" }, el("h2", { textContent: "Step 2: Connect Agents" }), selectedPC, projectHost, checklist), close),
   );
   let timer = 0;
   close.onclick = () => {
@@ -200,7 +252,6 @@ export async function connectModal(root: HTMLElement): Promise<void> {
       const { code } = await api<{ code: string }>("/pair", "POST");
       const cmd = connectCommand(origin(), code);
       pairBox.replaceChildren(
-        el("h2", { textContent: "Add a PC" }),
         el("p", { textContent: "Paste this one command into a terminal on the PC you want to connect (needs Node 18 or newer):" }),
         el("div", { class: "row" }, el("code", { class: "cmd grow", textContent: cmd }), copyButton(() => cmd)),
         el("p", {
@@ -238,7 +289,18 @@ export async function connectModal(root: HTMLElement): Promise<void> {
   const renderChecklist = (list: Device[], now: number) => {
     const t0 = testing;
     const d = t0 && list.find((x) => x.id === t0.id);
-    if (!t0 || !d) return checklist.replaceChildren();
+    if (!t0 || !d) {
+      selectedId = null;
+      selectedPC.textContent = "Connect a PC in step 1, or select Test next to a connected PC, to continue.";
+      projectHost.replaceChildren();
+      return checklist.replaceChildren();
+    }
+    selectedPC.textContent = `Set up agents on "${d.name}"`;
+    if (selectedId !== d.id) {
+      selectedId = d.id;
+      if (!projectPanels.has(d.id)) projectPanels.set(d.id, projectFields());
+      projectHost.replaceChildren(projectPanels.get(d.id)!);
+    }
     const passedFor = (agent: string) => {
       const e = d.agents.find((a) => a.agent === agent);
       return !!e?.seen && e.seen >= t0.since;
@@ -278,7 +340,7 @@ export async function connectModal(root: HTMLElement): Promise<void> {
     const update = updateCommand(origin());
     const done = TOOLS.every((t) => (d.agents.some((a) => a.agent === t.agent) ? passedFor(t.agent) : !!d.reported));
     checklist.replaceChildren(
-      el("h2", { textContent: `Agents on "${d.name}"` }),
+      el("h3", { textContent: "Agent status" }),
       ...(outdated
         ? [
             el(
@@ -294,16 +356,6 @@ export async function connectModal(root: HTMLElement): Promise<void> {
             ),
           ]
         : []),
-      el("p", { textContent: "Only folders you allow are reported. On that PC, run this; it asks you to paste the path of each project folder:" }),
-      el("div", { class: "row" }, el("code", { class: "cmd grow", textContent: ADD_CMD }), copyButton(() => ADD_CMD)),
-      el("p", { class: "dim", textContent: "You paste the path in the terminal on that PC, not in this page, so the list of folders never passes through the server." }),
-      el("p", { textContent: "Or run this inside a project folder:" }),
-      el("div", { class: "row" }, el("code", { class: "cmd grow", textContent: ALLOW_CMD }), copyButton(() => ALLOW_CMD)),
-      el("p", {
-        class: "dim",
-        textContent:
-          'Add --as "some name" to show an alias instead of the folder name. Subfolders and git worktrees are included; "disallow" and "list" manage the folders, and the list never leaves the PC.',
-      }),
       el("p", {
         textContent: done
           ? "Everything that is set up on this PC is reporting in."

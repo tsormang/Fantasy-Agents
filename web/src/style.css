@@ -141,6 +141,51 @@ a {
   min-width: 0;
 }
 
+.connect-step {
+  border-top: 1px solid var(--edge);
+  margin-top: 14px;
+  padding-top: 10px;
+}
+.connect-step h3 {
+  font-size: 12px;
+  margin: 12px 0 8px;
+}
+.project-path {
+  display: flex;
+  align-items: flex-end;
+  margin-bottom: 10px;
+}
+.project-path label {
+  flex: 1;
+  min-width: 0;
+}
+.project-path label span {
+  display: block;
+  margin-bottom: 4px;
+}
+.project-path button {
+  margin-left: 8px;
+}
+.project-command {
+  margin-bottom: 10px;
+}
+.project-command[hidden] {
+  display: none;
+}
+@media (max-width: 480px) {
+  .project-path,
+  .project-command {
+    flex-wrap: wrap;
+  }
+  .project-path label,
+  .project-command > .grow {
+    flex-basis: 100%;
+  }
+  .project-path button {
+    margin: 4px 0 0;
+  }
+}
+
 /* Chromium 56 supports neither flex gap nor unprefixed grid. */
 .no-flex-gap .row > * + *,
 .no-flex-gap ul.list li > * + * {
@@ -419,6 +464,9 @@ ul.list li span {
 .ts-ui .box h2 {
   color: #8a5a2b;
   margin-top: 10px;
+}
+.ts-ui .connect-step {
+  border-top-color: var(--paper-edge);
 }
 .ts-ui .box a:not(.btn) {
   color: var(--ink-teal);
