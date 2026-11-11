@@ -3,8 +3,9 @@ import { ago, el } from "./dom";
 import type { Game } from "./game/game";
 import { hash } from "./game/pix";
 import { img, loaded } from "./game/art";
-import { CLASS_LABEL, CLASS_OF, PC_COLORS, heroSprites } from "./game/sprites";
+import { CLASS_LABEL, CLASS_OF, PC_COLORS } from "./game/sprites";
 import type { Store } from "./store";
+import { loadSkins } from "./ui";
 
 const VERB: Record<string, string> = {
   edit: "Forging code",
@@ -37,6 +38,7 @@ export class Hud {
     private game: Game,
     actions: HTMLElement[] = [],
   ) {
+    loadSkins();
     this.dot = el("span", { class: "dot", title: "Connection" });
     this.stats = el("span", { class: "stats dim" });
     const toggle = el("button", { class: "quiet", textContent: "Heroes" });
@@ -82,10 +84,10 @@ export class Hud {
     const now = this.store.now();
     const rows = list.map((a) => {
       const cls = CLASS_OF[a.agent] ?? "warrior";
-      const icon = el("canvas", { width: 64, height: 64 });
-      // crop of the first idle frame
-      const portrait = img(heroSprites(a.agent, hash(a.pcId) % PC_COLORS.length).idle.name);
-      if (loaded(portrait)) icon.getContext("2d")!.drawImage(portrait, 52, 48, 92, 92, 0, 0, 64, 64);
+      const icon = el("canvas", { width: 96, height: 96 });
+      // the pack's portrait for this class in the PC's faction colour
+      const portrait = img(`avatar_${PC_COLORS[hash(a.pcId) % PC_COLORS.length]}_${cls}`);
+      if (loaded(portrait)) icon.getContext("2d")!.drawImage(portrait, 18, 20, 216, 216, 0, 0, 96, 96);
       const row = el(
         "button",
         { class: `hero${a.id === this.selected ? " sel" : ""}` },

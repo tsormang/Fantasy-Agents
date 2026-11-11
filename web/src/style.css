@@ -344,3 +344,109 @@ ul.list li span {
 .check li {
   margin-bottom: 3px;
 }
+
+/* ---------------------------------------------------- Tiny Swords HUD skin */
+/* Switched on by ui.ts once the pack's UI pieces have loaded; without them the plain HUD above stays. */
+
+.ts-ui .topbar {
+  align-items: center;
+}
+.ts-ui .title {
+  background: none;
+  box-shadow: none;
+  border-style: solid;
+  border-color: transparent;
+  border-width: 0 40px 0 41px;
+  border-image: var(--ui-ribbon) 0 97 0 98 fill / 0 40px 0 41px;
+  height: 43px;
+  padding: 0 4px 3px;
+  color: #fff;
+  text-shadow: 0 1px 0 rgba(20, 40, 60, 0.75);
+  filter: drop-shadow(0 3px 0 rgba(0, 0, 0, 0.25));
+}
+.ts-ui .title b {
+  color: #fff;
+}
+.ts-ui .title .dim {
+  color: #d6f1f2;
+}
+
+.ts-ui .topbar button,
+.ts-ui .topbar .btn {
+  background: none;
+  box-shadow: none;
+  border-style: solid;
+  border-color: transparent;
+  border-width: 11px 12px 13px;
+  border-image: var(--ui-button) 47 45 47 45 fill / 11px 12px 13px;
+  padding: 0 3px;
+  line-height: 14px;
+  color: #fff;
+  font-weight: 700;
+  text-shadow: 0 1px 0 rgba(20, 40, 60, 0.75);
+  filter: drop-shadow(0 2px 0 rgba(0, 0, 0, 0.2));
+}
+.ts-ui .topbar button.danger {
+  border-image-source: var(--ui-button-red);
+}
+.ts-ui .topbar button:hover,
+.ts-ui .topbar .btn:hover {
+  filter: drop-shadow(0 2px 0 rgba(0, 0, 0, 0.2)) brightness(1.08);
+}
+.ts-ui .topbar button:active,
+.ts-ui .topbar .btn:active {
+  transform: translateY(2px);
+  filter: brightness(0.92);
+}
+
+.ts-ui .roster {
+  top: 56px;
+  max-height: calc(100% - 68px);
+  background: none;
+  box-shadow: none;
+  border-style: solid;
+  border-color: transparent;
+  border-width: 14px 14px 15px;
+  border-image: var(--ui-paper) 44 52 45 52 fill / 14px 14px 15px;
+  padding: 0;
+  color: #3a2d2a;
+  filter: drop-shadow(0 4px 0 rgba(0, 0, 0, 0.25));
+  scrollbar-color: #b79f7c transparent;
+}
+.ts-ui .hero {
+  color: #3a2d2a;
+  grid-template-columns: 40px 1fr auto;
+  padding: 3px 4px;
+  border-radius: 6px;
+}
+.ts-ui .hero + .hero {
+  margin-top: 2px;
+}
+.ts-ui .hero:hover,
+.ts-ui .hero.sel {
+  background: rgba(126, 86, 40, 0.14);
+  border-color: transparent;
+}
+.ts-ui .hero.sel {
+  background: rgba(126, 86, 40, 0.24);
+  border-color: #8a6a44;
+}
+.ts-ui .hero canvas {
+  width: 40px;
+  height: 40px;
+}
+.ts-ui .hero .name {
+  font-weight: 700;
+}
+.ts-ui .hero .time,
+.ts-ui .hero .what,
+.ts-ui .empty {
+  color: #7d6a56;
+}
+.ts-ui .hero .what.working {
+  color: #2f6f73;
+}
+.ts-ui .hero .what.waiting {
+  color: #c0392b;
+  font-weight: 700;
+}

@@ -98,6 +98,21 @@ for (const [color, dir] of [["blue", "Blue"], ["red", "Red"], ["yellow", "Yellow
 }
 files.arrow = "Units/Blue Units/Archer/Arrow.png";
 
+// HUD skins and portraits. The avatar sheet runs colour by colour (blue, red, yellow, purple, black),
+// five heads each: warrior, lancer, archer, monk, pawn.
+const ui = "UI Elements/UI Elements";
+Object.assign(files, {
+  ui_paper: `${ui}/Papers/RegularPaper.png`,
+  ui_button_blue: `${ui}/Buttons/BigBlueButton_Regular.png`,
+  ui_button_red: `${ui}/Buttons/BigRedButton_Regular.png`,
+  ui_ribbons: `${ui}/Ribbons/BigRibbons.png`,
+});
+["blue", "red", "yellow", "purple"].forEach((color, c) => {
+  for (const [cls, i] of [["warrior", 1], ["archer", 3], ["monk", 4]]) {
+    files[`avatar_${color}_${cls}`] = `${ui}/Human Avatars/Avatars_${String(c * 5 + i).padStart(2, "0")}.png`;
+  }
+});
+
 const missing = Object.values(files).filter((rel) => !existsSync(join(src, rel)));
 if (missing.length) {
   console.error(`The pack in ${src} is missing ${missing.length} expected files, for example:\n  ${missing.slice(0, 5).join("\n  ")}`);
