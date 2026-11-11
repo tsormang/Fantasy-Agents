@@ -12,6 +12,15 @@
   </head>
   <body>
     <div id="app"></div>
+    <script>
+      // If startup fails on an old browser, say so instead of leaving a blank screen.
+      window.addEventListener("error", function (e) {
+        var d = document.createElement("pre");
+        d.style.cssText = "position:fixed;left:0;right:0;top:0;margin:0;padding:12px;background:#400;color:#fff;font:16px monospace;white-space:pre-wrap;z-index:99";
+        d.textContent = "Startup error: " + (e.message || "script failed to load") + " " + (e.filename || "") + ":" + (e.lineno || "");
+        document.body.appendChild(d);
+      });
+    </script>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

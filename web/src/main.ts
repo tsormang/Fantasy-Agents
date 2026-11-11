@@ -1,3 +1,4 @@
+import "./polyfills";
 import { startDemo } from "./demo";
 import { api, el } from "./dom";
 import { Game } from "./game/game";
