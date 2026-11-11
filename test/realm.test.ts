@@ -83,7 +83,7 @@ describe("auth", () => {
 
 describe("events", () => {
   it("rejects unknown devices and malformed events", async () => {
-    const ev = { v: 1, agent: "claude", session: "s1", event: "working" };
+    const ev = { v: 2, agent: "claude", session: "s1", event: "working" };
     expect((await api("/events", { bearer: "bogus", body: ev })).status).toBe(401);
     const m = await memberWithDevice();
     expect((await api("/events", { bearer: m.device.token, body: { ...ev, agent: "hal" } })).status).toBe(400);
@@ -94,7 +94,7 @@ describe("events", () => {
     const m = await memberWithDevice("Ada", "Forge-PC");
     const v = await watch("", m.cookie);
     expect(v.status).toBe(101);
-    const send = (body: object) => api("/events", { bearer: m.device.token, body: { v: 1, agent: "claude", session: "abc", ...body } });
+    const send = (body: object) => api("/events", { bearer: m.device.token, body: { v: 2, agent: "claude", session: "abc", ...body } });
 
     await send({ event: "working", project: "my-app", prompt: "secret prompt text" });
     await send({ event: "activity", activity: "edit" });
@@ -116,7 +116,7 @@ describe("events", () => {
 
   it("marks quiet working agents stale, then removes them", async () => {
     const m = await memberWithDevice();
-    await api("/events", { bearer: m.device.token, body: { v: 1, agent: "codex", session: "quiet", event: "working" } });
+    await api("/events", { bearer: m.device.token, body: { v: 2, agent: "codex", session: "quiet", event: "working" } });
     const stub = env.REALM.get(env.REALM.idFromName("realm"));
     const id = `${m.device.deviceId}:codex:quiet`;
     const age = (ms: number) =>
@@ -136,6 +136,56 @@ describe("events", () => {
   });
 });
 
+describe("privacy", () => {
+  it("refuses old connectors that report every folder, forgets their heroes and flags the PC", async () => {
+    const m = await memberWithDevice("Ada", "Old-PC");
+    const proto = async () => (await api("/devices", { cookie: m.cookie })).data.devices.find((d: any) => d.id === m.device.deviceId).proto;
+    const v2 = { v: 2, agent: "claude", session: "live", event: "working", project: "shared-app" };
+    expect((await api("/events", { bearer: m.device.token, body: v2 })).status).toBe(200);
+    expect(await proto()).toBe(2);
+
+    const v = await watch("", m.cookie);
+    const old = await api("/events", { bearer: m.device.token, body: { v: 1, agent: "claude", session: "x", event: "working", project: "corp-secret" } });
+    expect(old.status).toBe(426);
+    await tick();
+    expect(await proto()).toBe(1);
+    expect(JSON.stringify(v.msgs.slice(1))).not.toContain("corp-secret");
+    expect(v.msgs.at(-1)).toMatchObject({ t: "gone", id: `${m.device.deviceId}:claude:live` });
+    v.ws!.close();
+
+    const stub = env.REALM.get(env.REALM.idFromName("realm"));
+    const stored = await runInDurableObject(stub, (_o, state) =>
+      state.storage.sql.exec("SELECT project FROM agents WHERE device_id = ?", m.device.deviceId).toArray(),
+    );
+    expect(stored).toEqual([]);
+  });
+
+  it("stores and shows spectators only the documented fields", async () => {
+    const m = await memberWithDevice("Ada", "Forge-PC");
+    const share = await api("/shares", { cookie: m.own, body: { label: "TV" } });
+    await api("/events", {
+      bearer: m.device.token,
+      body: { v: 2, agent: "cursor", session: "spec", event: "activity", activity: "edit", project: "alias", cwd: "C:\corp\secret", tool_input: "rm -rf" },
+    });
+    const v = await watch(`?watch=${share.data.token}`);
+    await tick();
+    const snap = v.msgs[0] as Extract<ServerMsg, { t: "snapshot" }>;
+    const hero = snap.agents.find((a) => a.id === `${m.device.deviceId}:cursor:spec`)!;
+    expect(Object.keys(hero).sort()).toEqual(["activity", "agent", "id", "kills", "last", "owner", "pc", "pcId", "project", "since", "status"]);
+    expect(JSON.stringify(snap)).not.toMatch(/corp|rm -rf/);
+    v.ws!.close();
+
+    const stub = env.REALM.get(env.REALM.idFromName("realm"));
+    const dump = await runInDurableObject(stub, (_o, state) => {
+      const sql = state.storage.sql;
+      return JSON.stringify([sql.exec("SELECT * FROM agents").toArray(), sql.exec("SELECT * FROM devices").toArray(), sql.exec("SELECT * FROM device_agents").toArray()]);
+    });
+    expect(dump).not.toMatch(/corp|rm -rf/);
+    // device tokens are stored hashed only
+    expect(dump).not.toContain(m.device.token);
+  });
+});
+
 describe("setup checklist", () => {
   it("tracks which agents have hooks installed and which have reported in", async () => {
     const own = await owner();
@@ -150,9 +200,9 @@ describe("setup checklist", () => {
     expect((await api("/ping", { bearer: dev.data.token, method: "POST" })).data).toMatchObject({ ok: true, pc: "Check-PC" });
     expect((await api("/ping", { bearer: "bogus", method: "POST" })).status).toBe(401);
 
-    await api("/events", { bearer: dev.data.token, body: { v: 1, agent: "codex", session: "t", event: "working" } });
+    await api("/events", { bearer: dev.data.token, body: { v: 2, agent: "codex", session: "t", event: "working" } });
     // an agent the connector did not report still shows up once it sends events
-    await api("/events", { bearer: dev.data.token, body: { v: 1, agent: "cursor", session: "t", event: "working" } });
+    await api("/events", { bearer: dev.data.token, body: { v: 2, agent: "cursor", session: "t", event: "working" } });
     const agents = (await mine()).agents as { agent: string; seen: number | null }[];
     expect(agents.find((a) => a.agent === "claude")!.seen).toBeNull();
     expect(agents.find((a) => a.agent === "codex")!.seen).toBeGreaterThan(0);
@@ -164,7 +214,7 @@ describe("revocation", () => {
   it("a revoked device can no longer post", async () => {
     const m = await memberWithDevice();
     expect((await api(`/devices/${m.device.deviceId}`, { cookie: m.cookie, method: "DELETE" })).status).toBe(200);
-    const r = await api("/events", { bearer: m.device.token, body: { v: 1, agent: "claude", session: "s", event: "working" } });
+    const r = await api("/events", { bearer: m.device.token, body: { v: 2, agent: "claude", session: "s", event: "working" } });
     expect(r.status).toBe(401);
   });
 

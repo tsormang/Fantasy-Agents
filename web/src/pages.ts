@@ -126,6 +126,8 @@ interface Device {
   created: number;
   /** false for PCs paired before the connector reported its tools */
   reported: number;
+  /** connector wire version last seen: 1 = an old connector that reports every folder and is refused */
+  proto: number;
   agents: { agent: string; seen: number | null }[];
 }
 
@@ -154,6 +156,16 @@ export function connectCommand(base: string, code: string): string {
     `require('fs').writeFileSync(f,s);require('child_process').spawnSync(process.execPath,[f,'connect','${base}','${code}'],{stdio:'inherit'})})"`
   );
 }
+
+/** For a PC that is already connected: replace its connector with the current one, then show what it reports. */
+export function updateCommand(base: string): string {
+  return (
+    `node -e "fetch('${base}/fa.mjs').then(r=>r.ok?r.text():Promise.reject(r.status)).then(s=>{const f=require('path').join(require('os').homedir(),'.fantasy-agents','fa.mjs');` +
+    `require('fs').writeFileSync(f,s);require('child_process').spawnSync(process.execPath,[f,'status'],{stdio:'inherit'})})"`
+  );
+}
+
+const ALLOW_CMD = "node ~/.fantasy-agents/fa.mjs allow";
 
 export async function connectModal(root: HTMLElement): Promise<void> {
   const intro = el("div", {});
@@ -191,7 +203,12 @@ export async function connectModal(root: HTMLElement): Promise<void> {
         el("p", {
           class: "dim",
           textContent:
-            "The code inside works once and expires in 10 minutes. The connector lists the hook files it will change and asks before writing. It only ever sends: agent type, project folder name and activity kind. This dialog continues by itself once the PC connects.",
+            "The code inside works once and expires in 10 minutes. The connector asks what to call the PC, lists the hook files it will change and asks before writing. This dialog continues by itself once the PC connects.",
+        }),
+        el("p", {
+          class: "dim",
+          textContent:
+            "A connected PC reports nothing until you allow a project folder on it. For allowed folders it only ever sends: agent type, the folder's name (or an alias you choose) and an activity kind. Sessions in every other folder send nothing at all.",
         }),
       );
     } catch (x) {
@@ -254,16 +271,40 @@ export async function connectModal(root: HTMLElement): Promise<void> {
       }
       return item;
     });
+    const outdated = d.proto === 1;
+    const update = updateCommand(origin());
     const done = TOOLS.every((t) => (d.agents.some((a) => a.agent === t.agent) ? passedFor(t.agent) : !!d.reported));
     checklist.replaceChildren(
       el("h2", { textContent: `Agents on "${d.name}"` }),
+      ...(outdated
+        ? [
+            el(
+              "div",
+              { class: "check wait" },
+              el("div", { class: "row" }, el("b", { class: "grow", textContent: "Connector out of date" }), el("span", { class: "state", textContent: "Ignored" })),
+              el("p", {
+                class: "dim",
+                textContent:
+                  "This PC runs an old connector that reports every folder, so the village ignores it. Run this on that PC to update it; afterwards it reports only the folders you allow:",
+              }),
+              el("div", { class: "row" }, el("code", { class: "cmd grow", textContent: update }), copyButton(() => update)),
+            ),
+          ]
+        : []),
+      el("p", { textContent: "Only folders you allow are reported. On that PC, run this inside each project folder you want on the battlefield:" }),
+      el("div", { class: "row" }, el("code", { class: "cmd grow", textContent: ALLOW_CMD }), copyButton(() => ALLOW_CMD)),
+      el("p", {
+        class: "dim",
+        textContent:
+          'Add --as "some name" to show an alias instead of the folder name. Subfolders and git worktrees are included; "disallow" and "list" manage the folders, and the list never leaves the PC.',
+      }),
       el("p", {
         textContent: done
           ? "Everything that is set up on this PC is reporting in."
-          : "In each tool below, start a new session and send any prompt. This list updates by itself.",
+          : "Then, in each tool below, start a new session inside an allowed folder and send any prompt. This list updates by itself.",
       }),
       ...rows,
-      el("p", { class: "dim", textContent: "If nothing arrives at all, run this on that PC to check it can reach the server:" }),
+      el("p", { class: "dim", textContent: "If nothing arrives at all, run this on that PC to check it can reach the server and to see which folders it reports:" }),
       el("code", { class: "cmd", textContent: "node ~/.fantasy-agents/fa.mjs status" }),
     );
   };

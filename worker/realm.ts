@@ -5,6 +5,7 @@ import {
   AGENT_KINDS,
   DROP_BUSY_AFTER_MS,
   DROP_IDLE_AFTER_MS,
+  PROTO,
   STALE_AFTER_MS,
   cleanName,
   parseEvent,
@@ -61,6 +62,12 @@ export class Realm extends DurableObject<Env> {
     try {
       // Added after the first release: whether the connector told us which tools it set up.
       this.sql.exec("ALTER TABLE devices ADD COLUMN reported INTEGER NOT NULL DEFAULT 0");
+    } catch {
+      /* column already exists */
+    }
+    try {
+      // Connector wire version last seen from this PC: 0 = not heard yet, 1 = old connector that reports every folder.
+      this.sql.exec("ALTER TABLE devices ADD COLUMN proto INTEGER NOT NULL DEFAULT 0");
     } catch {
       /* column already exists */
     }
@@ -257,13 +264,14 @@ export class Realm extends DurableObject<Env> {
     const id = newId();
     const now = Date.now();
     this.sql.exec(
-      "INSERT INTO devices (id, hash, member_id, name, created, last_seen) VALUES (?, ?, ?, ?, ?, ?)",
+      "INSERT INTO devices (id, hash, member_id, name, created, last_seen, proto) VALUES (?, ?, ?, ?, ?, ?, ?)",
       id,
       await hashToken(token),
       row.member_id,
       pc,
       now,
       now,
+      b.v === PROTO ? PROTO : 1,
     );
     // Which agent tools the connector is installing hooks for, so the UI can offer a per-agent test.
     this.reportAgents(id, b.agents);
@@ -275,8 +283,9 @@ export class Realm extends DurableObject<Env> {
     const token = bearer(req);
     const device = token ? this.sql.exec("SELECT id, name FROM devices WHERE hash = ?", await hashToken(token)).toArray()[0] : null;
     if (!device) return err(401, "Unknown or revoked device");
-    this.sql.exec("UPDATE devices SET last_seen = ? WHERE id = ?", Date.now(), device.id);
-    this.reportAgents(device.id as string, (await body(req)).agents);
+    const b = await body(req);
+    this.sql.exec("UPDATE devices SET last_seen = ?, proto = ? WHERE id = ?", Date.now(), b.v === PROTO ? PROTO : 1, device.id);
+    this.reportAgents(device.id as string, b.agents);
     return json({ ok: true, pc: device.name });
   }
 
@@ -290,7 +299,7 @@ export class Realm extends DurableObject<Env> {
 
   private listDevices(me: Member): Response {
     const q =
-      "SELECT d.id, d.name, d.created, d.last_seen, d.reported, m.name AS owner FROM devices d JOIN members m ON m.id = d.member_id";
+      "SELECT d.id, d.name, d.created, d.last_seen, d.reported, d.proto, m.name AS owner FROM devices d JOIN members m ON m.id = d.member_id";
     const devices =
       me.role === "owner"
         ? this.sql.exec(`${q} ORDER BY d.created`).toArray()
@@ -314,10 +323,15 @@ export class Realm extends DurableObject<Env> {
   }
 
   private dropDevice(id: string): void {
-    const agents = this.sql.exec("SELECT id FROM agents WHERE device_id = ?", id).toArray();
-    this.sql.exec("DELETE FROM agents WHERE device_id = ?", id);
+    this.dropAgents(id);
     this.sql.exec("DELETE FROM device_agents WHERE device_id = ?", id);
     this.sql.exec("DELETE FROM devices WHERE id = ?", id);
+  }
+
+  private dropAgents(deviceId: string): void {
+    const agents = this.sql.exec("SELECT id FROM agents WHERE device_id = ?", deviceId).toArray();
+    if (!agents.length) return;
+    this.sql.exec("DELETE FROM agents WHERE device_id = ?", deviceId);
     for (const a of agents) this.broadcast({ t: "gone", id: a.id as string });
   }
 
@@ -326,10 +340,19 @@ export class Realm extends DurableObject<Env> {
   private async postEvent(req: Request): Promise<Response> {
     const token = bearer(req);
     if (!token) return err(401, "Device token required");
-    const device = this.sql.exec("SELECT id, last_seen FROM devices WHERE hash = ?", await hashToken(token)).toArray()[0];
+    const device = this.sql.exec("SELECT id, last_seen, proto FROM devices WHERE hash = ?", await hashToken(token)).toArray()[0];
     if (!device) return err(401, "Unknown or revoked device");
-    const ev = parseEvent(await body(req));
+    const raw = await body(req);
+    if (raw.v === 1) {
+      // An old connector reports every folder on its PC. Keep nothing from it, forget what it sent before,
+      // and remember that this PC needs updating so its owner is told.
+      if (device.proto !== 1) this.sql.exec("UPDATE devices SET proto = 1 WHERE id = ?", device.id);
+      this.dropAgents(device.id as string);
+      return err(426, "This connector is out of date: run the update command shown under Connect PC");
+    }
+    const ev = parseEvent(raw);
     if (!ev) return err(400, "Malformed event");
+    if (device.proto !== PROTO) this.sql.exec("UPDATE devices SET proto = ? WHERE id = ?", PROTO, device.id);
 
     const now = Date.now();
     if (now - (device.last_seen as number) > 60_000) this.sql.exec("UPDATE devices SET last_seen = ? WHERE id = ?", now, device.id);

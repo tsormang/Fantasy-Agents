@@ -2,14 +2,20 @@
 // Fantasy Agents connector. Zero dependencies, Node 18+.
 //
 //   node fa.mjs connect <url> <pairing-code> [--name "My PC"] [--only claude,codex,cursor] [--yes]
+//   node fa.mjs allow [folder] [--as "shown name"]   report agent sessions in this folder (default: current folder)
+//   node fa.mjs disallow [folder] | --all            stop reporting a folder
+//   node fa.mjs list                                 folders that are reported
 //   node fa.mjs status
+//   node fa.mjs update                               fetch the newest connector from the village
 //   node fa.mjs disconnect [--yes]
-//   node fa.mjs hook <claude|codex|cursor>     (called by the agent tools, reads hook JSON on stdin)
+//   node fa.mjs hook <claude|codex|cursor>           (called by the agent tools, reads hook JSON on stdin)
 //
-// Privacy: the hook sends ONLY { agent, hashed session id, event, activity kind, project folder name }.
+// Privacy: nothing is sent unless the session runs in a folder you allowed. The allow-list lives in
+// ~/.fantasy-agents/config.json and is checked here, on this machine; folder paths are never sent.
+// For an allowed folder the hook sends ONLY { agent, keyed session hash, event, activity kind, shown name }.
 // Prompts, commands, file paths and file contents never leave this machine.
 
-import { createHash } from "node:crypto";
+import { createHmac } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -21,6 +27,90 @@ const DIR = path.join(HOME, ".fantasy-agents");
 const CONFIG = path.join(DIR, "config.json");
 const SCRIPT = path.join(DIR, "fa.mjs");
 const MARK = ".fantasy-agents";
+/** Wire format version. v1 connectors reported every folder; the server refuses them. */
+const PROTO = 2;
+
+const clean = (s, max) =>
+  String(s ?? "")
+    .replace(/[\u0000-\u001f\u007f]/g, "")
+    .trim()
+    .slice(0, max);
+
+// ------------------------------------------------------------- allow-list
+
+const FOLD = process.platform === "win32" || process.platform === "darwin";
+const fold = (p) => (FOLD ? p.toLowerCase() : p);
+
+/** Absolute, symlink-free form of a folder path, or null when it is not an absolute path. */
+function canon(p) {
+  let s = String(p ?? "");
+  // some tools report Windows folders as /c:/Users/...
+  if (process.platform === "win32" && /^\/[A-Za-z]:[\\/]/.test(s)) s = s.slice(1);
+  if (!path.isAbsolute(s)) return null;
+  s = path.resolve(s);
+  try {
+    s = fs.realpathSync.native(s);
+  } catch {
+    /* folder is gone: compare by name */
+  }
+  return s;
+}
+
+const within = (child, parent) => {
+  const c = fold(child);
+  const p = fold(parent);
+  return c === p || c.startsWith(p.endsWith(path.sep) ? p : p + path.sep);
+};
+
+/** If `dir` is inside a linked git worktree, the same folder inside the main checkout. Reads only local files. */
+function worktreeTwin(dir) {
+  let d = dir;
+  for (let i = 0; i < 64; i++) {
+    const dotGit = path.join(d, ".git");
+    let st = null;
+    try {
+      st = fs.statSync(dotGit);
+    } catch {
+      /* keep walking up */
+    }
+    if (st) {
+      if (!st.isFile()) return null; // an ordinary checkout
+      const m = /^gitdir:\s*(.+?)\s*$/m.exec(fs.readFileSync(dotGit, "utf8"));
+      const w = m && /^(.*)[\\/]\.git[\\/]worktrees[\\/][^\\/]+$/.exec(path.resolve(d, m[1]));
+      const main = w && canon(w[1]);
+      return main ? path.join(main, path.relative(d, dir)) : null;
+    }
+    const up = path.dirname(d);
+    if (up === d) return null;
+    d = up;
+  }
+  return null;
+}
+
+/**
+ * The allow-list entry that covers `folder`: the folder itself, a subfolder, or a git worktree of an
+ * allowed folder. Returns null when the folder is not allowed, which means: send nothing.
+ */
+export function projectFor(folder, projects) {
+  if (typeof folder !== "string" || !folder || !Array.isArray(projects)) return null;
+  const list = projects.filter((p) => p && typeof p.path === "string" && path.isAbsolute(p.path));
+  if (!list.length) return null;
+  const find = (d) =>
+    list.filter((p) => within(d, path.resolve(p.path))).sort((a, b) => b.path.length - a.path.length)[0] ?? null;
+  try {
+    const dir = canon(folder);
+    if (!dir) return null;
+    const hit = find(dir);
+    if (hit) return hit;
+    const twin = worktreeTwin(dir);
+    return twin ? find(twin) : null;
+  } catch {
+    return null;
+  }
+}
+
+/** What viewers see for an allowed folder: its alias, or else the folder's own name. Never a path. */
+export const projectName = (p) => clean(p.name, 40) || clean(path.basename(p.path), 40) || "project";
 
 // ------------------------------------------------------------------ mapping
 
@@ -60,22 +150,27 @@ const CURSOR = {
   sessionEnd: () => ({ event: "end" }),
 };
 
-const hashId = (s) => createHash("sha256").update(String(s)).digest("hex").slice(0, 16);
+/** Keyed with this PC's device token, so the id cannot be recomputed or matched by anyone who knows a session id. */
+const hashId = (session, key) => createHmac("sha256", String(key)).update(String(session)).digest("hex").slice(0, 16);
 
-/** Turn a raw hook payload into the wire event. Returns null when there is nothing to report. */
-export function mapHook(agent, input) {
-  if (!input || typeof input !== "object") return null;
+/**
+ * Turn a raw hook payload into the wire event. Returns null when there is nothing to report, and in
+ * particular whenever the session's folder is not on this PC's allow-list (`cfg.projects`).
+ */
+export function mapHook(agent, input, cfg) {
+  if (!input || typeof input !== "object" || !cfg || !cfg.token) return null;
   const table = agent === "cursor" ? CURSOR : CLAUDE_LIKE;
-  const fn = table[input.hook_event_name];
+  const fn = Object.hasOwn(table, input.hook_event_name) ? table[input.hook_event_name] : null;
   const mapped = fn ? fn(input) : null;
   if (!mapped) return null;
   const session = input.session_id || input.conversation_id;
   if (!session) return null;
-  const root = input.cwd || (Array.isArray(input.workspace_roots) ? input.workspace_roots[0] : "") || "";
-  const out = { v: 1, agent, session: hashId(session), ...mapped };
-  const project = path.basename(String(root).replace(/[\\/]+$/, ""));
-  if (project) out.project = project.slice(0, 40);
-  return out;
+  // Every folder the session is tied to must be allowed. No folder information means: cannot tell, send nothing.
+  const folders = [input.cwd, ...(Array.isArray(input.workspace_roots) ? input.workspace_roots : [])].filter(Boolean);
+  if (!folders.length) return null;
+  const hits = folders.map((f) => projectFor(f, cfg.projects));
+  if (hits.some((h) => !h)) return null;
+  return { v: PROTO, agent, session: hashId(session, cfg.token), ...mapped, project: projectName(hits[0]) };
 }
 
 // --------------------------------------------------------------- hook files
@@ -138,7 +233,7 @@ export function addHooks(config, agent, cmd = hookCmd(agent)) {
 
 function readJson(file) {
   if (!fs.existsSync(file)) return {};
-  const text = fs.readFileSync(file, "utf8").replace(/^﻿/, "");
+  const text = fs.readFileSync(file, "utf8").replace(/^\uFEFF/, "");
   return text.trim() ? JSON.parse(text) : {};
 }
 
@@ -176,21 +271,48 @@ const installed = (agent) => {
 
 const loadConfig = () => {
   try {
-    return JSON.parse(fs.readFileSync(CONFIG, "utf8"));
+    const cfg = JSON.parse(fs.readFileSync(CONFIG, "utf8").replace(/^\uFEFF/, ""));
+    return cfg && typeof cfg === "object" ? cfg : null;
   } catch {
     return null;
   }
 };
 
+/** Hooks read this file while we write it, so replace it in one step. */
+function saveConfig(cfg) {
+  fs.mkdirSync(DIR, { recursive: true });
+  const text = JSON.stringify(cfg, null, 2) + "\n";
+  const tmp = `${CONFIG}.${process.pid}.tmp`;
+  try {
+    fs.writeFileSync(tmp, text, { mode: 0o600 });
+    fs.renameSync(tmp, CONFIG);
+  } catch {
+    fs.rmSync(tmp, { force: true });
+    fs.writeFileSync(CONFIG, text, { mode: 0o600 });
+  }
+}
+
+const projectsOf = (cfg) => (Array.isArray(cfg?.projects) ? cfg.projects.filter((p) => p && typeof p.path === "string") : []);
+const self = () => `node "${SCRIPT}"`;
+
 function flags(argv) {
   const out = { _: [] };
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === "--yes" || argv[i] === "-y") out.yes = true;
+    else if (argv[i] === "--all") out.all = true;
     else if (argv[i] === "--name") out.name = argv[++i];
     else if (argv[i] === "--only") out.only = argv[++i];
+    else if (argv[i] === "--as") out.as = argv[++i];
     else out._.push(argv[i]);
   }
   return out;
+}
+
+async function ask(question) {
+  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+  const answer = await new Promise((r) => rl.question(question, r));
+  rl.close();
+  return answer.trim();
 }
 
 async function confirm(question, yes) {
@@ -199,10 +321,72 @@ async function confirm(question, yes) {
     console.log(`${question} (not a terminal: re-run with --yes to proceed)`);
     return false;
   }
-  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-  const answer = await new Promise((r) => rl.question(`${question} [y/N] `, r));
-  rl.close();
-  return /^y(es)?$/i.test(answer.trim());
+  return /^y(es)?$/i.test(await ask(`${question} [y/N] `));
+}
+
+/** Home and drive roots would expose every project under them, so they need an explicit yes. */
+const tooBroad = (dir) => path.dirname(dir) === dir || within(canon(HOME) ?? HOME, dir);
+
+function printProjects(cfg) {
+  const list = projectsOf(cfg);
+  if (!list.length) {
+    console.log("  Reported folders: none. Nothing is sent from this PC.");
+    console.log(`  To show a project on the battlefield, run this inside its folder: ${self()} allow`);
+    return;
+  }
+  console.log(`  Reported folders (${list.length}), with their subfolders and git worktrees:`);
+  for (const p of list) console.log(`    ${p.path}  ->  shown as "${projectName(p)}"`);
+  console.log("  Sessions in any other folder send nothing.");
+}
+
+async function allow(argv) {
+  const f = flags(argv);
+  const dir = canon(path.resolve(f._[0] || process.cwd()));
+  let isDir = false;
+  try {
+    isDir = fs.statSync(dir).isDirectory();
+  } catch {
+    /* missing */
+  }
+  if (!isDir) return console.log(`Not a folder: ${f._[0] || process.cwd()}`);
+  if (tooBroad(dir) && !(await confirm(`${dir} contains your whole home folder or drive: every project under it would be reported. Allow it anyway?`, f.yes)))
+    return console.log("Nothing was changed.");
+  const cfg = loadConfig() ?? {};
+  const entry = { path: dir };
+  const alias = clean(f.as, 40);
+  if (alias) entry.name = alias;
+  const projects = projectsOf(cfg).filter((p) => fold(path.resolve(p.path)) !== fold(dir));
+  projects.push(entry);
+  saveConfig({ ...cfg, projects });
+  console.log(`Allowed: ${dir}`);
+  console.log(`  Viewers see it as "${projectName(entry)}"${alias ? "" : ` (the folder name; hide it with: ${self()} allow --as "an alias")`}.`);
+  console.log("  Its subfolders and git worktrees are included. The path itself is never sent.");
+  const twin = worktreeTwin(dir);
+  if (twin) console.log(`  Note: this is a git worktree of ${twin}. Allow that folder instead to cover all of its worktrees.`);
+  if (!cfg.token) console.log("  This PC is not connected yet, so nothing is sent until you run connect.");
+}
+
+function disallow(argv) {
+  const f = flags(argv);
+  const cfg = loadConfig();
+  const list = projectsOf(cfg);
+  if (!cfg || !list.length) return console.log("No folders are allowed. Nothing is sent from this PC.");
+  if (f.all) {
+    saveConfig({ ...cfg, projects: [] });
+    return console.log("Removed every allowed folder. Nothing is sent from this PC now.");
+  }
+  const dir = canon(path.resolve(f._[0] || process.cwd()));
+  const rest = list.filter((p) => fold(path.resolve(p.path)) !== fold(dir));
+  if (rest.length === list.length) {
+    const cover = projectFor(dir, list);
+    return console.log(
+      cover ? `${dir} is reported because ${cover.path} is allowed. To stop that: ${self()} disallow "${cover.path}"` : `${dir} was not allowed; nothing is sent from it.`,
+    );
+  }
+  saveConfig({ ...cfg, projects: rest });
+  console.log(`No longer reported: ${dir}`);
+  const cover = projectFor(dir, rest);
+  if (cover) console.log(`  Careful: it is still covered by ${cover.path}, which is allowed.`);
 }
 
 async function connect(argv) {
@@ -214,40 +398,56 @@ async function connect(argv) {
   if (!url.startsWith("https://") && !local) return console.log("The village URL must start with https://");
   const only = f.only ? f.only.split(",") : Object.keys(AGENTS);
   const targets = Object.keys(AGENTS).filter((a) => only.includes(a) && fs.existsSync(AGENTS[a].dir));
-  const pc = (f.name || os.hostname()).slice(0, 24);
+  const interactive = !f.yes && process.stdin.isTTY;
+  let name = f.name;
+  // The computer's own name can identify an employer, so it is a suggestion, not a given.
+  if (!name && interactive) name = await ask(`\nName for this PC, shown to everyone who can watch the village [${os.hostname()}]: `);
+  const pc = clean(name || os.hostname(), 24);
 
   console.log(`\nFantasy Agents will connect this PC as "${pc}" to ${url}\n`);
   if (!targets.length) console.log("No supported agent tools found (looked for ~/.claude, ~/.codex, ~/.cursor).");
   for (const a of targets) console.log(`  - ${AGENTS[a].label}: add hooks to ${AGENTS[a].file} (existing hooks are kept, a backup is made)`);
   console.log(`  - save the connector and a device token in ${DIR}`);
-  console.log("\nIt sends only: agent type, project folder name and activity kind. Never prompts, commands or code.\n");
+  console.log("\nNothing is reported until you allow a project folder. For allowed folders it sends only:");
+  console.log("agent type, the folder's name or your alias, and an activity kind. Never prompts, commands, paths or code.\n");
   if (!(await confirm("Proceed?", f.yes))) return console.log("Nothing was changed.");
 
   const res = await fetch(`${url}/api/connect`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ code, pc, agents: targets }),
+    body: JSON.stringify({ v: PROTO, code, pc, agents: targets }),
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) return console.log(`Could not connect: ${data.error || res.status}`);
 
-  fs.mkdirSync(DIR, { recursive: true });
-  fs.writeFileSync(CONFIG, JSON.stringify({ url, token: data.token, pc: data.pc, deviceId: data.deviceId }, null, 2), { mode: 0o600 });
-  const self = fileURLToPath(import.meta.url);
-  if (path.resolve(self) !== path.resolve(SCRIPT)) fs.copyFileSync(self, SCRIPT);
+  // folders allowed before (re)connecting stay allowed
+  let cfg = { url, token: data.token, pc: data.pc, deviceId: data.deviceId, projects: projectsOf(loadConfig()) };
+  saveConfig(cfg);
+  const me = fileURLToPath(import.meta.url);
+  if (path.resolve(me) !== path.resolve(SCRIPT)) fs.copyFileSync(me, SCRIPT);
 
   for (const a of targets) {
     if (writeHooks(a, (c) => addHooks(c, a))) console.log(`  ok: ${AGENTS[a].label}${AGENTS[a].note ? ` (${AGENTS[a].note})` : ""}`);
   }
   console.log(`\nConnected. Server check: ${await ping()}`);
-  console.log("Now go back to the web page: it shows a checklist to test each agent.");
-  console.log("Start a NEW session in each tool and send any prompt; running sessions do not pick up hooks.");
-  console.log(`To undo everything: node "${SCRIPT}" disconnect\n`);
+
+  const here = canon(process.cwd());
+  if (interactive && here && !tooBroad(here) && !projectFor(here, cfg.projects)) {
+    if (await confirm(`\nReport agent sessions that run in the current folder (${here})?`)) {
+      cfg = { ...cfg, projects: [...cfg.projects, { path: here }] };
+      saveConfig(cfg);
+    }
+  }
+  console.log("");
+  printProjects(cfg);
+  console.log("\nNow go back to the web page: it shows a checklist to test each agent.");
+  console.log("Start a NEW session in each tool, inside an allowed folder, and send any prompt; running sessions do not pick up hooks.");
+  console.log(`To undo everything: ${self()} disconnect\n`);
 }
 
 async function disconnect(argv) {
   const f = flags(argv);
-  if (!(await confirm("Remove Fantasy Agents hooks and the saved device token from this PC?", f.yes))) return console.log("Nothing was changed.");
+  if (!(await confirm("Remove Fantasy Agents hooks, the saved device token and the allowed-folder list from this PC?", f.yes))) return console.log("Nothing was changed.");
   for (const a of Object.keys(AGENTS)) {
     if (fs.existsSync(AGENTS[a].file) && installed(a) && writeHooks(a, removeHooks)) console.log(`  removed hooks: ${AGENTS[a].label}`);
   }
@@ -258,13 +458,13 @@ async function disconnect(argv) {
 
 async function ping() {
   const cfg = loadConfig();
-  if (!cfg) return "not connected";
+  if (!cfg?.token) return "not connected";
   try {
     const res = await fetch(`${cfg.url}/api/ping`, {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${cfg.token}` },
       // tell the server which tools have our hooks, so its checklist is accurate
-      body: JSON.stringify({ agents: Object.keys(AGENTS).filter(installed) }),
+      body: JSON.stringify({ v: PROTO, agents: Object.keys(AGENTS).filter(installed) }),
       signal: AbortSignal.timeout(5000),
     });
     if (res.ok) return "ok";
@@ -276,12 +476,28 @@ async function ping() {
 
 async function status() {
   const cfg = loadConfig();
-  console.log(cfg ? `Connected as "${cfg.pc}" to ${cfg.url}` : "Not connected.");
-  if (cfg) console.log(`  Server check: ${await ping()}`);
+  console.log(cfg?.token ? `Connected as "${cfg.pc}" to ${cfg.url}` : "Not connected.");
+  if (cfg?.token) console.log(`  Server check: ${await ping()}`);
+  printProjects(cfg);
+  const here = canon(process.cwd());
+  const hit = here && projectFor(here, projectsOf(cfg));
+  console.log(`  This folder (${here}): ${hit ? `reported as "${projectName(hit)}"` : "not reported"}`);
   for (const a of Object.keys(AGENTS)) {
     const spec = AGENTS[a];
     console.log(`  ${spec.label}: ${!fs.existsSync(spec.dir) ? "not installed" : installed(a) ? "hooks installed" : "no hooks"}`);
   }
+}
+
+/** Replace the installed connector with the one the village serves. The hooks already point at it. */
+async function update() {
+  const cfg = loadConfig();
+  if (!cfg?.url) return console.log("Not connected, so there is no village to update from.");
+  const res = await fetch(`${cfg.url}/fa.mjs`, { signal: AbortSignal.timeout(10_000) });
+  const text = res.ok ? await res.text() : "";
+  if (!text.startsWith("#!/usr/bin/env node") || !text.includes("Fantasy Agents connector")) return console.log(`Could not download the connector from ${cfg.url}/fa.mjs`);
+  fs.mkdirSync(DIR, { recursive: true });
+  fs.writeFileSync(SCRIPT, text);
+  console.log(`Updated ${SCRIPT}. Run "${self()} status" to see what this PC reports.`);
 }
 
 // --------------------------------------------------------------------- hook
@@ -314,11 +530,12 @@ async function hook(agent) {
       raw += chunk;
       if (raw.length > 5_000_000) break;
     }
-    const input = JSON.parse(raw.replace(/^﻿/, ""));
+    const input = JSON.parse(raw.replace(/^\uFEFF/, ""));
     if (agent === "cursor" && input.hook_event_name === "beforeSubmitPrompt") process.stdout.write('{"continue":true}\n');
     const cfg = loadConfig();
-    const ev = mapHook(agent, input);
-    if (!cfg || !ev || throttled(ev)) return;
+    // mapHook returns null for any folder that is not allowed: then nothing at all is sent or written.
+    const ev = cfg?.url ? mapHook(agent, input, cfg) : null;
+    if (!ev || throttled(ev)) return;
     await fetch(`${cfg.url}/api/events`, {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${cfg.token}` },
@@ -346,5 +563,21 @@ if (isMain) {
   } else if (cmd === "connect") await connect(rest);
   else if (cmd === "disconnect") await disconnect(rest);
   else if (cmd === "status") await status();
-  else console.log("Fantasy Agents connector\n  node fa.mjs connect <url> <pairing-code>\n  node fa.mjs status\n  node fa.mjs disconnect");
+  else if (cmd === "allow") await allow(rest);
+  else if (cmd === "disallow") disallow(rest);
+  else if (cmd === "list") printProjects(loadConfig());
+  else if (cmd === "update") await update();
+  else
+    console.log(
+      [
+        "Fantasy Agents connector",
+        "  node fa.mjs connect <url> <pairing-code>",
+        '  node fa.mjs allow [folder] [--as "shown name"]   report sessions in a folder (default: the current one)',
+        "  node fa.mjs disallow [folder] | --all",
+        "  node fa.mjs list",
+        "  node fa.mjs status",
+        "  node fa.mjs update",
+        "  node fa.mjs disconnect",
+      ].join("\n"),
+    );
 }

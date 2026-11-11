@@ -1,6 +1,6 @@
 # Fantasy Agents
 
-A live battlefield for your coding agents, drawn with the Tiny Swords art pack. Every Claude Code, Codex or Cursor session on a connected PC is a hero: idle heroes rest in the village, working heroes cross the bridge and fight the black army's raiders and lancers until the task is done.
+A live battlefield for your coding agents, drawn with the Tiny Swords art pack. Every Claude Code, Codex or Cursor session in a project folder you allowed on a connected PC is a hero: idle heroes rest in the village, working heroes cross the bridge and fight the black army's raiders and lancers until the task is done.
 
 | Agent | Class | Activity on screen |
 | --- | --- | --- |
@@ -21,7 +21,24 @@ PC hooks --POST /api/events--> Worker --> Realm Durable Object --WebSocket--> br
 - `connector/fa.mjs` dependency-free Node script that installs hooks and posts events. Served by the Worker at `/fa.mjs`.
 - `shared/protocol.ts` wire format.
 
-**Privacy:** a connected PC sends only the agent type, a hashed session id, the project folder name and an activity kind (`edit`, `command`, `search`, `read`, `web`, `subagent`, `think`). Prompts, commands, paths and code never leave the machine. This is enforced in `mapHook` and covered by a test.
+## Privacy
+
+A connected PC reports **nothing** until its owner allows a project folder on it. The allow-list lives on the PC in `~/.fantasy-agents/config.json` and is checked by the connector before anything is posted, so a session in any other folder produces no network request at all. The server never sees the list or any path.
+
+For a session in an allowed folder the connector sends only:
+
+- the agent type (`claude`, `codex`, `cursor`);
+- a session id, which is an HMAC of the tool's session id keyed with that PC's device token, so it cannot be recomputed or matched against a session id by anyone else;
+- the event (`start`, `working`, `activity`, `waiting`, `idle`, `end`) and an activity kind (`edit`, `command`, `search`, `read`, `web`, `subagent`, `think`);
+- the name of the allowed folder, or the alias you gave it. This is the name of the folder you allowed, never of the subfolder or worktree the agent happens to be in.
+
+Prompts, commands, tool input, file names, paths and code never leave the machine. This is enforced in `mapHook` in `connector/fa.mjs` and covered by tests, including one that runs the real hook in a folder that is not allowed and asserts that no request is made.
+
+Separately, `connect` and `status` send the PC's name and which of the three tools have hooks installed. The name defaults to the computer's hostname; the connector asks for it, so pick something else if the hostname identifies your employer.
+
+What the server keeps: for each live session one row with the fields above plus timestamps and a tool-call count, deleted when the session ends or goes quiet; for each PC its name, a hash of its token and when it was last heard from. There is no history, and the Worker does not log events.
+
+Who sees what: every signed-in member **and everyone holding a spectator link** sees every hero: agent type, project name or alias, PC name, the PC owner's member name, status, activity kind and timing. If a project name should not be visible to those people, give the folder an alias or do not allow it.
 
 ## Get the sprites
 
@@ -61,8 +78,23 @@ npm run deploy
 ## Use
 
 1. Open the site and sign in with the owner token.
-2. **Connect PC** shows one command to paste into a terminal on a machine, then a checklist that confirms each agent tool reports in. The browser remembers the PC it paired, so reopening the dialog goes straight to its status. The connector lists the hook files it will change, asks before writing, keeps existing hooks and makes backups.
-3. **Council** creates single-use invite links for other people and revocable read-only spectator links (`/watch/...`) for TVs or phones.
-4. To remove a PC: `node ~/.fantasy-agents/fa.mjs disconnect`, and revoke it under Connect PC.
+2. **Connect PC** shows one command to paste into a terminal on a machine, then a checklist that confirms each agent tool reports in. The browser remembers the PC it paired, so reopening the dialog goes straight to its status. The connector asks what to call the PC, lists the hook files it will change, asks before writing, keeps existing hooks and makes backups.
+3. Choose which projects appear. A newly connected PC shares nothing. In each project folder you want on the battlefield:
+
+   ```bash
+   node ~/.fantasy-agents/fa.mjs allow                     # the current folder
+   node ~/.fantasy-agents/fa.mjs allow path/to/project --as "side project"   # show an alias instead of the folder name
+   node ~/.fantasy-agents/fa.mjs list                      # what is reported
+   node ~/.fantasy-agents/fa.mjs disallow path/to/project  # or: disallow --all
+   node ~/.fantasy-agents/fa.mjs status                    # connection, reported folders, whether the current folder is reported
+   ```
+
+   Allowing a folder covers its subfolders and its git worktrees, wherever those are on disk. Changes apply to the next event, also for sessions that are already running. An event is judged by the folder it happens in: if an agent leaves the allowed folder, its hero stops updating and fades. `connect` also offers to allow the folder it is run from.
+4. **Council** creates single-use invite links for other people and revocable read-only spectator links (`/watch/...`) for TVs or phones.
+5. To remove a PC: `node ~/.fantasy-agents/fa.mjs disconnect`, and revoke it under Connect PC.
 
 Hook files touched: `~/.claude/settings.json`, `~/.codex/hooks.json`, `~/.cursor/hooks.json`. For Cursor only after-the-fact events are used, so the connector can never block an action. Codex silently skips new hooks until you trust them (desktop app: **Settings > Hooks**; CLI: `/hooks`), then start a new chat.
+
+### Updating a PC connected before the allow-list
+
+Older connectors reported every folder on the PC. The server now refuses their events and forgets their heroes, and Connect PC marks such a PC as out of date and shows a one-line update command. With a connector that already has it, `node ~/.fantasy-agents/fa.mjs update` does the same. The connection and hooks are kept; after updating, the PC reports nothing until you `allow` folders. Until a PC is updated, its old connector still posts events for every folder to the village server, which discards them; run `disconnect` on a PC you cannot update yet.

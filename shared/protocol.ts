@@ -11,9 +11,15 @@ export type Activity = (typeof ACTIVITIES)[number];
 
 export type AgentStatus = "idle" | "working" | "waiting" | "stale";
 
+/**
+ * Wire format version. Version 1 connectors reported every folder on the PC; from version 2 the connector
+ * only reports folders its owner allowed, so the server refuses version 1 outright.
+ */
+export const PROTO = 2;
+
 /** What a connected PC posts to /api/events. Nothing else is accepted. */
 export interface AgentEvent {
-  v: 1;
+  v: typeof PROTO;
   agent: AgentKind;
   session: string;
   event: EventKind;
@@ -50,12 +56,12 @@ const clean = (s: unknown, max: number): string =>
 export function parseEvent(raw: unknown): AgentEvent | null {
   if (!raw || typeof raw !== "object") return null;
   const o = raw as Record<string, unknown>;
-  if (o.v !== 1) return null;
+  if (o.v !== PROTO) return null;
   if (!AGENT_KINDS.includes(o.agent as AgentKind)) return null;
   if (!EVENT_KINDS.includes(o.event as EventKind)) return null;
   const session = clean(o.session, 64);
   if (!/^[A-Za-z0-9_-]{1,64}$/.test(session)) return null;
-  const ev: AgentEvent = { v: 1, agent: o.agent as AgentKind, session, event: o.event as EventKind };
+  const ev: AgentEvent = { v: PROTO, agent: o.agent as AgentKind, session, event: o.event as EventKind };
   if (ACTIVITIES.includes(o.activity as Activity)) ev.activity = o.activity as Activity;
   const project = clean(o.project, 40);
   if (project) ev.project = project;
