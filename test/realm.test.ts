@@ -238,7 +238,7 @@ describe("privacy", () => {
     await tick();
     const snap = v.msgs[0] as Extract<ServerMsg, { t: "snapshot" }>;
     const hero = snap.agents.find((a) => a.id === `${m.device.deviceId}:cursor:spec`)!;
-    expect(Object.keys(hero).sort()).toEqual(["activity", "agent", "id", "kills", "last", "name", "nameCategory", "owner", "ownerId", "pc", "pcId", "project", "since", "status"]);
+    expect(Object.keys(hero).sort()).toEqual(["activity", "agent", "id", "kills", "last", "name", "nameCategory", "owner", "ownerId", "pc", "pcColor", "pcId", "project", "since", "status"]);
     expect(JSON.stringify(snap)).not.toMatch(/corp|rm -rf/);
     v.ws!.close();
 
@@ -254,6 +254,32 @@ describe("privacy", () => {
 });
 
 describe("setup checklist", () => {
+  it("saves a selected color during pairing and broadcasts owner-only color edits immediately", async () => {
+    const m = await memberWithDevice("Colors", "Automatic PC");
+    expect((await api("/pair", { cookie: m.cookie, body: { color: "black" } })).status).toBe(400);
+    const pair = await api("/pair", { cookie: m.cookie, body: { color: "red" } });
+    const dev = (await api("/connect", { body: { code: pair.data.code, pc: "Red PC" } })).data;
+    const endpoint = `/devices/${dev.deviceId}`;
+    const list = (await api("/devices", { cookie: m.cookie })).data.devices;
+    expect(list.find((d: any) => d.id === dev.deviceId).color).toBe("red");
+    expect(list.find((d: any) => d.id === m.device.deviceId).color).toBeNull();
+    await api("/events", { bearer: dev.token, body: { v: 2, agent: "claude", session: "color", event: "working" } });
+    const v = await watch("", m.cookie);
+    await tick();
+    const snapshot = v.msgs[0] as Extract<ServerMsg, { t: "snapshot" }>;
+    expect(snapshot.agents.find((a) => a.pcId === dev.deviceId)?.pcColor).toBe("red");
+    expect((await api(endpoint, { method: "PATCH", body: { color: "blue" } })).status).toBe(401);
+    expect((await api(endpoint, { cookie: m.own, method: "PATCH", body: { color: "blue" } })).status).toBe(403);
+    expect((await api(endpoint, { cookie: m.cookie, method: "PATCH", body: { color: "black" } })).status).toBe(400);
+    expect((await api(endpoint, { cookie: m.cookie, method: "PATCH", body: { color: "purple" } })).status).toBe(200);
+    await tick();
+    expect(v.msgs.at(-1)).toMatchObject({ t: "agent", agent: { pcId: dev.deviceId, pcColor: "purple" } });
+    expect((await api("/devices", { cookie: m.cookie })).data.devices.find((d: any) => d.id === dev.deviceId).color).toBe("purple");
+    expect((await api(endpoint, { cookie: m.cookie, method: "PATCH", body: { color: null } })).status).toBe(200);
+    await tick();
+    expect(v.msgs.at(-1)).toMatchObject({ t: "agent", agent: { pcColor: null } });
+    v.ws!.close();
+  });
   it("marks only the signed-in member's devices as editable, including for village owners", async () => {
     const m = await memberWithDevice("Editor", "Member PC");
     const pair = await api("/pair", { cookie: m.own, method: "POST" });

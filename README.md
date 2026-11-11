@@ -8,6 +8,8 @@ Click your own resting hero, on the battlefield or in the Heroes list, to remove
 
 The generated commands use the connector's existing alias option with a reserved `@names:<category>` value, so installed connectors can select categories without reinstalling hooks. The server stores assigned hero names and categories alongside session state; paths remain local to the PC.
 
+Choose a PC color (Blue, Red, Yellow, Purple, or Automatic) before generating its connection command. Edit agents also offers a PC color selector for your own machines. Save PC color applies immediately to all its active heroes, ribbons and portraits, for every viewer in full and lite graphics, without a terminal command. Automatic preserves the original ID-based palette; PCs may deliberately share a color.
+
 | Agent | Class | Activity on screen |
 | --- | --- | --- |
 | Claude Code | Monk (casts bolts) | edit = sparks, command = explosion, search/read = scrying ring, web = arcane ring, sub-agent = familiar |

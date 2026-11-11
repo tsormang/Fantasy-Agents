@@ -171,6 +171,16 @@ a {
 .edit-devices button {
   margin: 0 8px 10px 0;
 }
+.pc-color-editor label,
+.pc-color-choice {
+  display: block;
+  margin-bottom: 8px;
+}
+.pc-color-editor label span,
+.pc-color-choice span {
+  display: block;
+  margin-bottom: 4px;
+}
 .connect-step h3 {
   font-size: 12px;
   margin: 12px 0 8px;

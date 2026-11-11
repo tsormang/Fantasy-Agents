@@ -4,12 +4,13 @@ import { hash } from "./game-lite/pix";
 import { CLASS_LABEL, CLASS_OF, heroSprites } from "./game-lite/sprites";
 import { Hud, type Appearance } from "./hud";
 import type { Store } from "./store";
+import { pcColorIndex } from "../../shared/colors";
 
 const appearance: Appearance = {
   classLabel: (a) => CLASS_LABEL[CLASS_OF[a.agent]],
   portrait(a) {
     const icon = el("canvas", { width: 16, height: 16 });
-    icon.getContext("2d")!.drawImage(heroSprites(a.agent, hash(a.pcId) % 8).walk[0][0], 0, 0);
+    icon.getContext("2d")!.drawImage(heroSprites(a.agent, pcColorIndex(a.pcColor, hash(a.pcId), true)).walk[0][0], 0, 0);
     return icon;
   },
 };

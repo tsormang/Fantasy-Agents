@@ -12,10 +12,12 @@ const pagesCode = compile("../web/src/pages.ts");
 const domCode = compile("../web/src/dom.ts");
 const namesContext = vm.createContext({ exports: {} });
 vm.runInContext(compile("../shared/names.ts"), namesContext);
+const colorsContext = vm.createContext({ exports: {} });
+vm.runInContext(compile("../shared/colors.ts"), colorsContext);
 
 function loadPages(extra = {}, dom = {}) {
   const context = vm.createContext({ exports: {}, TextEncoder, btoa, ...extra,
-    require: (name) => name === "./dom" ? dom : name === "../../shared/names" ? namesContext.exports : {},
+    require: (name) => name === "./dom" ? dom : name === "../../shared/names" ? namesContext.exports : name === "../../shared/colors" ? colorsContext.exports : {},
   });
   vm.runInContext(pagesCode, context);
   return context.exports;
@@ -222,7 +224,7 @@ test("Edit tab lists only owned PCs and imports paths locally without uploading 
   const editPanel = root.all().find((node) => node.textContent === "Edit your agents").parent;
   const inputs = editPanel.all().filter((node) => node.type === "text");
   assert.deepEqual(inputs.map((node) => node.value), ["/old", ""]);
-  const category = editPanel.querySelector("select");
+  const category = editPanel.all().find((node) => node.tag === "select" && node.className !== "pc-color-select");
   assert.equal(category.value, "fantasy");
   inputs[1].value = "/new";
   category.value = "ancient-greek";
@@ -237,4 +239,45 @@ test("Edit tab lists only owned PCs and imports paths locally without uploading 
   assert.equal(editPanel.all().find((node) => node.type === "text"), inputs[0]);
   assert.equal(category.value, "ancient-greek");
   assert.ok(requests.every(([url, method, body]) => url === "/devices" && !method && !body));
+  const pcColor = editPanel.all().find((node) => node.className === "pc-color-select");
+  pcColor.value = "purple";
+  await find("Save PC color").onclick();
+  assert.deepEqual(JSON.parse(JSON.stringify(requests.at(-1))), ["/devices/mine", "PATCH", { color: "purple" }]);
+});
+
+test("new PC connection command captures the selected color and clears when the color changes", async () => {
+  const document = { createElement: (tag) => Object.assign(new Element(), { tag }) };
+  const domContext = vm.createContext({ exports: {}, document });
+  vm.runInContext(domCode, domContext);
+  const requests = [];
+  const pages = loadPages({
+    window: { setInterval: () => 1 }, localStorage: { getItem: () => null, removeItem() {} },
+    location: { origin: "https://example.com" },
+  }, { ...domContext.exports,
+    api: async (...args) => { requests.push(args); return args[0] === "/devices" ? { devices: [], now: 1000 } : { code: "test-code" }; },
+    copyButton: () => new Element(),
+  });
+  const root = new Element();
+  await pages.connectModal(root);
+  const color = root.all().find((node) => node.className === "pc-color-select");
+  color.value = "red";
+  color.onchange();
+  await root.all().find((node) => node.textContent === "Generate connection command").onclick();
+  assert.deepEqual(JSON.parse(JSON.stringify(requests.at(-1))), ["/pair", "POST", { color: "red" }]);
+  assert.ok(root.all().some((node) => node.tag === "code" && node.textContent.includes("test-code")));
+  color.value = "blue";
+  color.onchange();
+  assert.equal(root.all().some((node) => node.tag === "code"), false);
+});
+
+test("chosen PC colors map to matching full and lite palettes, preserving automatic colors", () => {
+  const { pcColorIndex, isPcColor } = colorsContext.exports;
+  for (const [color, full, lite] of [["blue", 0, 0], ["red", 1, 1], ["yellow", 2, 3], ["purple", 3, 4]]) {
+    assert.equal(pcColorIndex(color, 7), full);
+    assert.equal(pcColorIndex(color, 7, true), lite);
+    assert.equal(isPcColor(color), true);
+  }
+  assert.equal(pcColorIndex(null, 7), 3);
+  assert.equal(pcColorIndex(undefined, 7, true), 7);
+  assert.equal(isPcColor("black"), false);
 });

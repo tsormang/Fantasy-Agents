@@ -13,6 +13,7 @@ import {
 import { COOKIE, bearer, hashToken, newId, newToken, readCookie, sameOrigin, sessionCookie } from "./auth";
 import type { Env } from "./index";
 import { NAME_CATEGORIES, nameCategory, randomAgentName, type NameCategory } from "../shared/names";
+import { isPcColor } from "../shared/colors";
 
 const YEAR_S = 365 * 24 * 3600;
 const PAIR_TTL_MS = 10 * 60_000;
@@ -64,6 +65,9 @@ export class Realm extends DurableObject<Env> {
       try { this.sql.exec(`ALTER TABLE agents ADD COLUMN ${column}`); } catch { /* already migrated */ }
     }
     this.sql.exec("CREATE TABLE IF NOT EXISTS dismissed_agents (id TEXT PRIMARY KEY, device_id TEXT NOT NULL, removed INTEGER NOT NULL, hero_name TEXT NOT NULL, name_category TEXT NOT NULL)");
+    for (const table of ["devices", "pairings"]) {
+      try { this.sql.exec(`ALTER TABLE ${table} ADD COLUMN color TEXT`); } catch { /* already migrated */ }
+    }
     try {
       // Added after the first release: whether the connector told us which tools it set up.
       this.sql.exec("ALTER TABLE devices ADD COLUMN reported INTEGER NOT NULL DEFAULT 0");
@@ -104,10 +108,11 @@ export class Realm extends DurableObject<Env> {
       const me = await this.member(req);
       if (!me) return err(401, "Not signed in");
 
-      if (path === "/pair" && m === "POST") return await this.createPairing(me);
+      if (path === "/pair" && m === "POST") return await this.createPairing(me, req);
       if (path === "/devices" && m === "GET") return this.listDevices(me);
       const dev = path.match(/^\/devices\/([\w-]+)$/);
       if (dev && m === "DELETE") return this.deleteDevice(me, dev[1]);
+      if (dev && m === "PATCH") return await this.updateDevice(me, dev[1], req);
       const agent = path.match(/^\/agents\/([^/]+)$/);
       if (agent && m === "DELETE") return this.dismissAgent(me, decodeURIComponent(agent[1]));
 
@@ -250,11 +255,13 @@ export class Realm extends DurableObject<Env> {
 
   // ---------------------------------------------------------------- devices
 
-  private async createPairing(me: Member): Promise<Response> {
+  private async createPairing(me: Member, req: Request): Promise<Response> {
+    const b = await body(req);
+    if (b.color != null && !isPcColor(b.color)) return err(400, "Choose a valid PC color");
     this.sql.exec("DELETE FROM pairings WHERE expires < ?", Date.now());
     const code = newToken(15);
     const expires = Date.now() + PAIR_TTL_MS;
-    this.sql.exec("INSERT INTO pairings (hash, member_id, expires) VALUES (?, ?, ?)", await hashToken(code), me.id, expires);
+    this.sql.exec("INSERT INTO pairings (hash, member_id, expires, color) VALUES (?, ?, ?, ?)", await hashToken(code), me.id, expires, b.color ?? null);
     return json({ code, expires });
   }
 
@@ -264,14 +271,14 @@ export class Realm extends DurableObject<Env> {
     const pc = cleanName(b.pc) || "Unnamed PC";
     if (typeof b.code !== "string") return err(400, "Pairing code required");
     const hash = await hashToken(b.code);
-    const row = this.sql.exec("SELECT member_id, expires FROM pairings WHERE hash = ?", hash).toArray()[0];
+    const row = this.sql.exec("SELECT member_id, expires, color FROM pairings WHERE hash = ?", hash).toArray()[0];
     this.sql.exec("DELETE FROM pairings WHERE hash = ?", hash);
     if (!row || (row.expires as number) < Date.now()) return err(403, "Pairing code is invalid or expired");
     const token = newToken();
     const id = newId();
     const now = Date.now();
     this.sql.exec(
-      "INSERT INTO devices (id, hash, member_id, name, created, last_seen, proto) VALUES (?, ?, ?, ?, ?, ?, ?)",
+      "INSERT INTO devices (id, hash, member_id, name, created, last_seen, proto, color) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
       id,
       await hashToken(token),
       row.member_id,
@@ -279,6 +286,7 @@ export class Realm extends DurableObject<Env> {
       now,
       now,
       b.v === PROTO ? PROTO : 1,
+      row.color,
     );
     // Which agent tools the connector is installing hooks for, so the UI can offer a per-agent test.
     this.reportAgents(id, b.agents);
@@ -306,7 +314,7 @@ export class Realm extends DurableObject<Env> {
 
   private listDevices(me: Member): Response {
     const q =
-      "SELECT d.id, d.name, d.member_id, d.created, d.last_seen, d.reported, d.proto, m.name AS owner FROM devices d JOIN members m ON m.id = d.member_id";
+      "SELECT d.id, d.name, d.color, d.member_id, d.created, d.last_seen, d.reported, d.proto, m.name AS owner FROM devices d JOIN members m ON m.id = d.member_id";
     const devices =
       me.role === "owner"
         ? this.sql.exec(`${q} ORDER BY d.created`).toArray()
@@ -315,7 +323,7 @@ export class Realm extends DurableObject<Env> {
     return json({
       now: Date.now(),
       devices: devices.map((d) => ({
-        id: d.id, name: d.name, created: d.created, last_seen: d.last_seen,
+        id: d.id, name: d.name, color: d.color, created: d.created, last_seen: d.last_seen,
         reported: d.reported, proto: d.proto, owner: d.owner,
         editable: d.member_id === me.id,
         agents: hooks.filter((h) => h.device_id === d.id).map((h) => ({ agent: h.agent, seen: h.seen })),
@@ -329,6 +337,18 @@ export class Realm extends DurableObject<Env> {
     if (me.role !== "owner" && row.member_id !== me.id) return err(403, "Not your device");
     this.dropDevice(id);
     return json({ ok: true });
+  }
+
+  private async updateDevice(me: Member, id: string, req: Request): Promise<Response> {
+    const device = this.sql.exec("SELECT member_id FROM devices WHERE id = ?", id).toArray()[0];
+    if (!device) return err(404, "No such PC");
+    if (device.member_id !== me.id) return err(403, "You can edit only your own PCs");
+    const b = await body(req);
+    if (b.color !== null && !isPcColor(b.color)) return err(400, "Choose a valid PC color");
+    this.sql.exec("UPDATE devices SET color = ? WHERE id = ?", b.color, id);
+    const now = Date.now();
+    for (const agent of this.agents().filter((a) => a.pcId === id)) this.broadcast({ t: "agent", agent, now });
+    return json({ ok: true, color: b.color });
   }
 
   private dropDevice(id: string): void {
@@ -466,7 +486,7 @@ export class Realm extends DurableObject<Env> {
   }
 
   private agents(id?: string): AgentState[] {
-    const q = `SELECT a.id, a.agent, d.name AS pc, d.id AS pcId, m.name AS owner, m.id AS ownerId, a.hero_name AS name, a.name_category AS nameCategory, a.project, a.status, a.activity, a.since, a.last, a.kills
+    const q = `SELECT a.id, a.agent, d.name AS pc, d.id AS pcId, d.color AS pcColor, m.name AS owner, m.id AS ownerId, a.hero_name AS name, a.name_category AS nameCategory, a.project, a.status, a.activity, a.since, a.last, a.kills
                FROM agents a JOIN devices d ON d.id = a.device_id JOIN members m ON m.id = d.member_id`;
     const cur = id ? this.sql.exec(`${q} WHERE a.id = ?`, id) : this.sql.exec(`${q} ORDER BY a.since`);
     return cur.toArray() as unknown as AgentState[];

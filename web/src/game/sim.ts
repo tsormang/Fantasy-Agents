@@ -1,5 +1,6 @@
 // Cosmetic battle simulation: heroes mirror agent state, enemies exist to be fought.
 import type { Activity, AgentState } from "../../../shared/protocol";
+import { pcColorIndex } from "../../../shared/colors";
 import { ago } from "../dom";
 import { type Strip, U, drawStrip, frameCount, img, loaded } from "./art";
 import { describe } from "./describe";
@@ -177,8 +178,8 @@ export class Sim {
           id: a.id,
           a,
           cls: CLASS_OF[a.agent] ?? "warrior",
-          spr: heroSprites(a.agent, hash(a.pcId) % PC_COLORS.length),
-          color: hash(a.pcId) % PC_COLORS.length,
+          spr: heroSprites(a.agent, pcColorIndex(a.pcColor, hash(a.pcId))),
+          color: pcColorIndex(a.pcColor, hash(a.pcId)),
           x: start.x,
           y: start.y,
           path: [],
@@ -203,6 +204,10 @@ export class Sim {
         if (!this.first) this.poof(h.x, h.y - MID, "#b46cff", 14);
         if (!this.first && !busy(a)) h.path = [home];
       } else {
+        if (h.a.pcColor !== a.pcColor) {
+          h.color = pcColorIndex(a.pcColor, hash(a.pcId));
+          h.spr = heroSprites(a.agent, h.color);
+        }
         if (a.kills > h.seenKills && a.activity) {
           for (let i = 0; i < Math.min(3, a.kills - h.seenKills); i++) if (h.specials.length < 3) h.specials.push(a.activity);
         }

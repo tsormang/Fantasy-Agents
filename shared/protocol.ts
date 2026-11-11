@@ -33,6 +33,7 @@ export interface AgentState {
   agent: AgentKind;
   pc: string;
   pcId: string;
+  pcColor?: string | null;
   owner: string;
   ownerId?: string;
   name?: string;

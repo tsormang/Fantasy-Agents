@@ -1,6 +1,7 @@
 import { ago, api, copyButton, el } from "./dom";
 import { alternateModePath, lite, modePath } from "./mode";
 import { NAME_CATEGORIES, categoryAlias, nameCategory } from "../../shared/names";
+import { PC_COLOR_OPTIONS } from "../../shared/colors";
 
 export interface Member {
   id: string;
@@ -128,6 +129,7 @@ interface Device {
   owner: string;
   /** Only the signed-in member's own PCs can be edited. */
   editable: boolean;
+  color: string | null;
   created: number;
   /** false for PCs paired before the connector reported its tools */
   reported: number;
@@ -261,6 +263,35 @@ function projectFields(edit = false): HTMLElement {
   );
 }
 
+function pcColorSelect(value: string | null): HTMLSelectElement {
+  const select = el("select", { class: "pc-color-select" }, el("option", { value: "", textContent: "Automatic" }),
+    ...PC_COLOR_OPTIONS.map((color) => el("option", { value: color.id, textContent: color.label })));
+  select.value = value || "";
+  return select;
+}
+
+function pcColorEditor(device: Device): HTMLElement {
+  const select = pcColorSelect(device.color);
+  const status = el("p", { class: "dim", textContent: "All agents on this PC share this color." });
+  const save = el("button", { class: "quiet", textContent: "Save PC color", type: "button" });
+  status.setAttribute("aria-live", "polite");
+  save.onclick = async () => {
+    save.disabled = true;
+    select.disabled = true;
+    status.textContent = "Saving...";
+    try {
+      await api(`/devices/${device.id}`, "PATCH", { color: select.value || null });
+      status.className = "dim";
+      status.textContent = "PC color saved. Your agents update immediately; no terminal command is needed.";
+    } catch (error) {
+      status.className = "err";
+      status.textContent = (error as Error).message;
+    } finally { save.disabled = false; select.disabled = false; }
+  };
+  return el("div", { class: "pc-color-editor" },
+    el("label", {}, el("span", { textContent: "PC color" }), select), el("p", {}, save), status);
+}
+
 export async function connectModal(root: HTMLElement, initialTab: "connect" | "edit" = "connect"): Promise<void> {
   const intro = el("div", {});
   const pairBox = el("div", {});
@@ -317,7 +348,10 @@ export async function connectModal(root: HTMLElement, initialTab: "connect" | "e
       return button;
     }));
     if (!editId) return editHost.replaceChildren(el("p", { class: "dim", textContent: "You have no connected PCs to edit. Use Connect to add your PC first. You can edit only your own agents." }));
-    if (!editPanels.has(editId)) editPanels.set(editId, el("div", {}, el("h3", { textContent: `Projects on "${own.find((d) => d.id === editId)!.name}"` }), projectFields(true)));
+    if (!editPanels.has(editId)) {
+      const device = own.find((d) => d.id === editId)!;
+      editPanels.set(editId, el("div", {}, el("h3", { textContent: `Settings for "${device.name}"` }), pcColorEditor(device), projectFields(true)));
+    }
     const panel = editPanels.get(editId)!;
     if (editHost.firstChild !== panel) editHost.replaceChildren(panel);
   };
@@ -325,10 +359,17 @@ export async function connectModal(root: HTMLElement, initialTab: "connect" | "e
   const showPair = async () => {
     if (pairing) return;
     pairing = true;
-    try {
-      const { code } = await api<{ code: string }>("/pair", "POST");
-      const cmd = connectCommand(origin(), code);
-      pairBox.replaceChildren(
+    const color = pcColorSelect(null);
+    const generate = el("button", { class: "quiet", type: "button", textContent: "Generate connection command" });
+    const instructions = el("div", {});
+    color.onchange = () => { instructions.replaceChildren(); };
+    generate.onclick = async () => {
+      generate.disabled = true;
+      color.disabled = true;
+      try {
+        const { code } = await api<{ code: string }>("/pair", "POST", { color: color.value || null });
+        const cmd = connectCommand(origin(), code);
+        instructions.replaceChildren(
         el("p", { textContent: "Paste this one command into a terminal on the PC you want to connect (needs Node 18 or newer):" }),
         el("div", { class: "row" }, el("code", { class: "cmd grow", textContent: cmd }), copyButton(() => cmd)),
         el("p", {
@@ -341,11 +382,15 @@ export async function connectModal(root: HTMLElement, initialTab: "connect" | "e
           textContent:
             "A connected PC reports nothing until you allow a project folder on it. For allowed folders it only ever sends: agent type, the folder's name (or an alias you choose) and an activity kind. Sessions in every other folder send nothing at all.",
         }),
-      );
-    } catch (x) {
-      pairing = false;
-      pairBox.replaceChildren(el("p", { class: "err", textContent: (x as Error).message }));
-    }
+        );
+      } catch (x) {
+        instructions.replaceChildren(el("p", { class: "err", textContent: (x as Error).message }));
+      } finally { generate.disabled = false; color.disabled = false; }
+    };
+    pairBox.replaceChildren(
+      el("label", { class: "pc-color-choice" }, el("span", { textContent: "PC color" }), color),
+      el("p", { class: "dim", textContent: "Choose the color for all agents on the PC you are connecting. You can change it later in Edit." }),
+      el("p", {}, generate), instructions);
   };
 
   const renderIntro = (list: Device[]) => {

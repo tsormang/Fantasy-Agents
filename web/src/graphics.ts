@@ -6,13 +6,14 @@ import { hash } from "./game/pix";
 import { CLASS_LABEL, CLASS_OF, PC_COLORS } from "./game/sprites";
 import { Hud, type Appearance } from "./hud";
 import type { Store } from "./store";
+import { pcColorIndex } from "../../shared/colors";
 export { loadSkins } from "./ui";
 
 const appearance: Appearance = {
   classLabel: (a) => CLASS_LABEL[CLASS_OF[a.agent]],
   portrait(a) {
     const icon = el("canvas", { width: 96, height: 96 });
-    const portrait = img(`avatar_${PC_COLORS[hash(a.pcId) % PC_COLORS.length]}_${CLASS_OF[a.agent]}`);
+    const portrait = img(`avatar_${PC_COLORS[pcColorIndex(a.pcColor, hash(a.pcId))]}_${CLASS_OF[a.agent]}`);
     if (loaded(portrait)) icon.getContext("2d")!.drawImage(portrait, 18, 20, 216, 216, 0, 0, 96, 96);
     return icon;
   },
