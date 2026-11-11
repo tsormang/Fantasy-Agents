@@ -166,7 +166,7 @@ export function updateCommand(base: string): string {
 }
 
 const ALLOW_CMD = 'node "$HOME/.fantasy-agents/fa.mjs" allow';
-const BROWSE_CMD = 'node "$HOME/.fantasy-agents/fa.mjs" browse';
+const ADD_CMD = 'node "$HOME/.fantasy-agents/fa.mjs" add';
 
 export async function connectModal(root: HTMLElement): Promise<void> {
   const intro = el("div", {});
@@ -292,9 +292,9 @@ export async function connectModal(root: HTMLElement): Promise<void> {
             ),
           ]
         : []),
-      el("p", { textContent: "Only folders you allow are reported. On that PC, run this to pick project folders in a folder window:" }),
-      el("div", { class: "row" }, el("code", { class: "cmd grow", textContent: BROWSE_CMD }), copyButton(() => BROWSE_CMD)),
-      el("p", { class: "dim", textContent: "The window opens on that PC, not in this page: a web page cannot see folder paths, and the list of folders must never pass through the server." }),
+      el("p", { textContent: "Only folders you allow are reported. On that PC, run this; it asks you to paste the path of each project folder:" }),
+      el("div", { class: "row" }, el("code", { class: "cmd grow", textContent: ADD_CMD }), copyButton(() => ADD_CMD)),
+      el("p", { class: "dim", textContent: "You paste the path in the terminal on that PC, not in this page, so the list of folders never passes through the server." }),
       el("p", { textContent: "Or run this inside a project folder:" }),
       el("div", { class: "row" }, el("code", { class: "cmd grow", textContent: ALLOW_CMD }), copyButton(() => ALLOW_CMD)),
       el("p", {
@@ -313,7 +313,7 @@ export async function connectModal(root: HTMLElement): Promise<void> {
       ...(outdated
         ? []
         : [
-            el("p", { class: "dim", textContent: 'If a command above is unknown on that PC (for example "browse"), its connector is older than this page. Run this there to update it:' }),
+            el("p", { class: "dim", textContent: 'If a command above is unknown on that PC (for example "add"), its connector is older than this page. Run this there to update it:' }),
             el("div", { class: "row" }, el("code", { class: "cmd grow", textContent: update }), copyButton(() => update)),
           ]),
       el("p", { class: "dim", textContent: "These commands work in PowerShell, bash and zsh. In the old Windows Command Prompt, replace $HOME with %USERPROFILE%." }),

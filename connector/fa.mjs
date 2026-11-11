@@ -3,7 +3,8 @@
 //
 //   node fa.mjs connect <url> <pairing-code> [--name "My PC"] [--only claude,codex,cursor] [--yes]
 //   node fa.mjs allow [folder] [--as "shown name"]   report agent sessions in this folder (default: current folder)
-//   node fa.mjs browse                               pick folders to report in a folder window
+//   node fa.mjs add                                  asks you to paste the path of a folder to report
+//   node fa.mjs browse                                same, but picks the folder in a folder window
 //   node fa.mjs disallow [folder] | --all            stop reporting a folder
 //   node fa.mjs list                                 folders that are reported
 //   node fa.mjs status
@@ -334,7 +335,7 @@ function printProjects(cfg) {
   if (!list.length) {
     console.log("  Reported folders: none. Nothing is sent from this PC.");
     console.log(`  To show a project on the battlefield, run this inside its folder: ${self()} allow`);
-    console.log(`  Or pick folders in a window: ${self()} browse`);
+    console.log(`  Or paste folder paths when asked: ${self()} add`);
     return;
   }
   console.log(`  Reported folders (${list.length}), with their subfolders and git worktrees:`);
@@ -378,6 +379,31 @@ function pickFolder(prompt) {
     return String(r.stdout || "").trim() || null;
   }
   return undefined;
+}
+
+/** Ask for folder paths one at a time. Pasted paths often arrive wrapped in quotes ("Copy as path" on Windows). */
+async function add(argv) {
+  const f = flags(argv);
+  if (!process.stdin.isTTY) return console.log(`This command asks questions, so it needs a terminal. Without one: ${self()} allow "path/to/project"`);
+  for (;;) {
+    const typed = (await ask("\nPaste the path of a project folder to report (Enter to stop): ")).replace(/^(["'])(.*)\1$/, "$2").trim();
+    if (!typed) break;
+    const dir = canon(path.resolve(typed));
+    let isDir = false;
+    try {
+      isDir = fs.statSync(dir).isDirectory();
+    } catch {
+      /* missing */
+    }
+    if (!isDir) {
+      console.log(`  Not a folder: ${typed}`);
+      continue;
+    }
+    const alias = f.as ?? (await ask(`Name shown to viewers [${path.basename(dir)}]: `));
+    await allow([dir, ...(alias ? ["--as", alias] : [])]);
+  }
+  console.log("");
+  printProjects(loadConfig());
 }
 
 async function browse(argv) {
@@ -619,6 +645,7 @@ if (isMain) {
   else if (cmd === "disconnect") await disconnect(rest);
   else if (cmd === "status") await status();
   else if (cmd === "allow") await allow(rest);
+  else if (cmd === "add") await add(rest);
   else if (cmd === "browse") await browse(rest);
   else if (cmd === "disallow") disallow(rest);
   else if (cmd === "list") printProjects(loadConfig());
@@ -629,6 +656,7 @@ if (isMain) {
         "Fantasy Agents connector",
         "  node fa.mjs connect <url> <pairing-code>",
         '  node fa.mjs allow [folder] [--as "shown name"]   report sessions in a folder (default: the current one)',
+        "  node fa.mjs add                                  asks you to paste a folder path",
         "  node fa.mjs browse                               pick folders in a folder window",
         "  node fa.mjs disallow [folder] | --all",
         "  node fa.mjs list",

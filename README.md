@@ -82,7 +82,8 @@ npm run deploy
 3. Choose which projects appear. A newly connected PC shares nothing. In each project folder you want on the battlefield:
 
    ```bash
-   node "$HOME/.fantasy-agents/fa.mjs" browse                    # pick folders in a folder window
+   node "$HOME/.fantasy-agents/fa.mjs" add                       # asks you to paste the path of each folder
+   node "$HOME/.fantasy-agents/fa.mjs" browse                    # same, but pick the folder in a folder window
    node "$HOME/.fantasy-agents/fa.mjs" allow                     # the current folder
    node "$HOME/.fantasy-agents/fa.mjs" allow path/to/project --as "side project"   # show an alias instead of the folder name
    node "$HOME/.fantasy-agents/fa.mjs" list                      # what is reported
