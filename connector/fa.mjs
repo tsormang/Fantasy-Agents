@@ -3,6 +3,7 @@
 //
 //   node fa.mjs connect <url> <pairing-code> [--name "My PC"] [--only claude,codex,cursor] [--yes]
 //   node fa.mjs allow [folder] [--as "shown name"]   report agent sessions in this folder (default: current folder)
+//   node fa.mjs browse                               pick folders to report in a folder window
 //   node fa.mjs disallow [folder] | --all            stop reporting a folder
 //   node fa.mjs list                                 folders that are reported
 //   node fa.mjs status
@@ -15,6 +16,7 @@
 // For an allowed folder the hook sends ONLY { agent, keyed session hash, event, activity kind, shown name }.
 // Prompts, commands, file paths and file contents never leave this machine.
 
+import { spawnSync } from "node:child_process";
 import { createHmac } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
@@ -332,11 +334,64 @@ function printProjects(cfg) {
   if (!list.length) {
     console.log("  Reported folders: none. Nothing is sent from this PC.");
     console.log(`  To show a project on the battlefield, run this inside its folder: ${self()} allow`);
+    console.log(`  Or pick folders in a window: ${self()} browse`);
     return;
   }
   console.log(`  Reported folders (${list.length}), with their subfolders and git worktrees:`);
   for (const p of list) console.log(`    ${p.path}  ->  shown as "${projectName(p)}"`);
   console.log("  Sessions in any other folder send nothing.");
+}
+
+/**
+ * Ask the operating system for a folder with its own folder window. The choice stays on this PC: a web page
+ * cannot do this, because browsers never reveal a folder's path. Returns null when cancelled, undefined when
+ * this system has no folder window we can open.
+ */
+function pickFolder(prompt) {
+  const run = (cmd, args) => spawnSync(cmd, args, { encoding: "utf8", windowsHide: true });
+  const tries =
+    process.platform === "win32"
+      ? [
+          [
+            "powershell",
+            [
+              "-NoProfile",
+              "-STA",
+              "-Command",
+              "Add-Type -AssemblyName System.Windows.Forms; [Console]::OutputEncoding = [Text.Encoding]::UTF8; " +
+                "$d = New-Object System.Windows.Forms.FolderBrowserDialog; $d.Description = $env:FA_PROMPT; $d.ShowNewFolderButton = $false; $d.SelectedPath = (Get-Location).Path; " +
+                "$top = New-Object System.Windows.Forms.Form -Property @{ TopMost = $true }; " +
+                "if ($d.ShowDialog($top) -eq [System.Windows.Forms.DialogResult]::OK) { [Console]::Out.Write($d.SelectedPath) }",
+            ],
+          ],
+        ]
+      : process.platform === "darwin"
+        ? [["osascript", ["-e", `POSIX path of (choose folder with prompt ${JSON.stringify(prompt)})`]]]
+        : [
+            ["zenity", ["--file-selection", "--directory", `--title=${prompt}`]],
+            ["kdialog", ["--getexistingdirectory", process.cwd(), "--title", prompt]],
+          ];
+  process.env.FA_PROMPT = prompt;
+  for (const [cmd, args] of tries) {
+    const r = run(cmd, args);
+    if (r.error) continue; // that tool is not installed
+    return String(r.stdout || "").trim() || null;
+  }
+  return undefined;
+}
+
+async function browse(argv) {
+  const f = flags(argv);
+  for (;;) {
+    const picked = pickFolder("Fantasy Agents: choose a project folder to report");
+    if (picked === undefined) return console.log(`No folder window is available here. Give the folder instead: ${self()} allow "path/to/project"`);
+    if (picked === null) return console.log("No folder chosen.");
+    let alias = f.as;
+    if (alias === undefined && process.stdin.isTTY)
+      alias = await ask(`Name shown to viewers for ${picked} [${path.basename(picked)}]: `);
+    await allow([picked, ...(alias ? ["--as", alias] : []), ...(f.yes ? ["--yes"] : [])]);
+    if (!process.stdin.isTTY || !(await confirm("\nChoose another folder?"))) return;
+  }
 }
 
 async function allow(argv) {
@@ -564,6 +619,7 @@ if (isMain) {
   else if (cmd === "disconnect") await disconnect(rest);
   else if (cmd === "status") await status();
   else if (cmd === "allow") await allow(rest);
+  else if (cmd === "browse") await browse(rest);
   else if (cmd === "disallow") disallow(rest);
   else if (cmd === "list") printProjects(loadConfig());
   else if (cmd === "update") await update();
@@ -573,6 +629,7 @@ if (isMain) {
         "Fantasy Agents connector",
         "  node fa.mjs connect <url> <pairing-code>",
         '  node fa.mjs allow [folder] [--as "shown name"]   report sessions in a folder (default: the current one)',
+        "  node fa.mjs browse                               pick folders in a folder window",
         "  node fa.mjs disallow [folder] | --all",
         "  node fa.mjs list",
         "  node fa.mjs status",

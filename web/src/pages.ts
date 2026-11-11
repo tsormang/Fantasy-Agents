@@ -166,6 +166,7 @@ export function updateCommand(base: string): string {
 }
 
 const ALLOW_CMD = "node ~/.fantasy-agents/fa.mjs allow";
+const BROWSE_CMD = "node ~/.fantasy-agents/fa.mjs browse";
 
 export async function connectModal(root: HTMLElement): Promise<void> {
   const intro = el("div", {});
@@ -291,7 +292,10 @@ export async function connectModal(root: HTMLElement): Promise<void> {
             ),
           ]
         : []),
-      el("p", { textContent: "Only folders you allow are reported. On that PC, run this inside each project folder you want on the battlefield:" }),
+      el("p", { textContent: "Only folders you allow are reported. On that PC, run this to pick project folders in a folder window:" }),
+      el("div", { class: "row" }, el("code", { class: "cmd grow", textContent: BROWSE_CMD }), copyButton(() => BROWSE_CMD)),
+      el("p", { class: "dim", textContent: "The window opens on that PC, not in this page: a web page cannot see folder paths, and the list of folders must never pass through the server." }),
+      el("p", { textContent: "Or run this inside a project folder:" }),
       el("div", { class: "row" }, el("code", { class: "cmd grow", textContent: ALLOW_CMD }), copyButton(() => ALLOW_CMD)),
       el("p", {
         class: "dim",

@@ -82,6 +82,7 @@ npm run deploy
 3. Choose which projects appear. A newly connected PC shares nothing. In each project folder you want on the battlefield:
 
    ```bash
+   node ~/.fantasy-agents/fa.mjs browse                    # pick folders in a folder window
    node ~/.fantasy-agents/fa.mjs allow                     # the current folder
    node ~/.fantasy-agents/fa.mjs allow path/to/project --as "side project"   # show an alias instead of the folder name
    node ~/.fantasy-agents/fa.mjs list                      # what is reported
@@ -89,7 +90,7 @@ npm run deploy
    node ~/.fantasy-agents/fa.mjs status                    # connection, reported folders, whether the current folder is reported
    ```
 
-   Allowing a folder covers its subfolders and its git worktrees, wherever those are on disk. Changes apply to the next event, also for sessions that are already running. An event is judged by the folder it happens in: if an agent leaves the allowed folder, its hero stops updating and fades. `connect` also offers to allow the folder it is run from.
+   Allowing a folder covers its subfolders and its git worktrees, wherever those are on disk. Changes apply to the next event, also for sessions that are already running. An event is judged by the folder it happens in: if an agent leaves the allowed folder, its hero stops updating and fades. `connect` also offers to allow the folder it is run from. The folder window of `browse` opens on the PC itself (Windows, macOS, or Linux with zenity or kdialog); the web page cannot offer one, because browsers do not reveal folder paths and the list must not pass through the server.
 4. **Council** creates single-use invite links for other people and revocable read-only spectator links (`/watch/...`) for TVs or phones.
 5. To remove a PC: `node ~/.fantasy-agents/fa.mjs disconnect`, and revoke it under Connect PC.
 
