@@ -623,3 +623,6 @@ ul.list li span {
     padding: 0 2px;
   }
 }
+
+/* The lite renderer draws at world resolution and lets CSS enlarge the pixels. */
+.lite canvas.field { image-rendering: pixelated; }

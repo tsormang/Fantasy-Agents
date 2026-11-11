@@ -1,12 +1,18 @@
 import type { AgentState } from "../../shared/protocol";
 import { ago, el } from "./dom";
 import { describe } from "./game/describe";
-import type { Game } from "./game/game";
-import { hash } from "./game/pix";
-import { img, loaded } from "./game/art";
-import { CLASS_LABEL, CLASS_OF, PC_COLORS } from "./game/sprites";
 import type { Store } from "./store";
 import { observeSize } from "./resize";
+
+export interface Battlefield {
+  select(id: string | null): void;
+  onSelect: (id: string | null) => void;
+}
+
+export interface Appearance {
+  portrait(agent: AgentState): HTMLCanvasElement;
+  classLabel(agent: AgentState): string;
+}
 
 const RANK: Record<string, number> = { waiting: 0, working: 1, stale: 2, idle: 3 };
 
@@ -19,7 +25,8 @@ export class Hud {
   constructor(
     root: HTMLElement,
     private store: Store,
-    private game: Game,
+    private game: Battlefield,
+    private appearance: Appearance,
     actions: HTMLElement[] = [],
   ) {
     this.dot = el("span", { class: "dot", title: "Connection" });
@@ -68,11 +75,7 @@ export class Hud {
 
     const now = this.store.now();
     const rows = list.map((a) => {
-      const cls = CLASS_OF[a.agent] ?? "warrior";
-      const icon = el("canvas", { width: 96, height: 96 });
-      // the pack's portrait for this class in the PC's faction colour
-      const portrait = img(`avatar_${PC_COLORS[hash(a.pcId) % PC_COLORS.length]}_${cls}`);
-      if (loaded(portrait)) icon.getContext("2d")!.drawImage(portrait, 18, 20, 216, 216, 0, 0, 96, 96);
+      const icon = this.appearance.portrait(a);
       const row = el(
         "button",
         { class: `hero${a.id === this.selected ? " sel" : ""}` },
@@ -81,7 +84,7 @@ export class Hud {
         el("span", { class: "time", textContent: ago(now - a.since) }),
         el("span", {
           class: `what ${a.status}`,
-          textContent: `${CLASS_LABEL[cls]} (${a.agent}) - ${describe(a)}${a.status === "working" && a.kills ? ` - ${a.kills} slain` : ""}`,
+          textContent: `${this.appearance.classLabel(a)} (${a.agent}) - ${describe(a)}${a.status === "working" && a.kills ? ` - ${a.kills} slain` : ""}`,
         }),
       );
       row.title = `Owner: ${a.owner}`;

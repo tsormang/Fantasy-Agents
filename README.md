@@ -67,6 +67,20 @@ npm run typecheck
 `http://localhost:8787/?demo` shows scripted fake agents; add `&night=1` to force night lighting.
 Local owner sign-in uses `ADMIN_TOKEN` from `.dev.vars` (git-ignored).
 
+### Lightweight graphics
+
+Open **https://fantasy-agents.tsormang.workers.dev/lite** for the original
+code-drawn pixel graphics. The normal `/` site keeps the Tiny Swords art.
+Use **Lite graphics** / **Full graphics** on the battlefield or sign-in page
+to switch. Lite uses a low-resolution canvas, caps rendering at 30 FPS, pauses
+rendering in hidden tabs, and skips all Tiny Swords image and UI downloads.
+It shares the same sign-in, live agents and connected PCs.
+
+For a TV spectator link, insert `/lite` before `/watch/...`:
+`https://fantasy-agents.tsormang.workers.dev/lite/watch/YOUR_TOKEN`.
+Demo: `/lite?demo`; forced night: `/lite?demo&night=1`.
+Lite reduces graphics work; the browser compatibility target below still applies.
+
 ### Samsung TV browsers
 
 The production build includes a legacy JavaScript bundle targeting Chromium 56

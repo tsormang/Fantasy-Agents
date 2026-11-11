@@ -1,4 +1,5 @@
 import { ago, api, copyButton, el } from "./dom";
+import { alternateModePath, lite, modePath } from "./mode";
 
 export interface Member {
   id: string;
@@ -38,7 +39,8 @@ export function landingPage(root: HTMLElement): void {
         el("h1", { textContent: "Fantasy Agents" }),
         el("p", { textContent: "A village of coding agents. When one starts working, its hero marches out to battle." }),
         el("p", { class: "dim", textContent: "Watching needs an invite link from the village owner, or a spectator link." }),
-        el("a", { class: "btn", href: "/?demo", textContent: "Watch the demo" }),
+        el("a", { class: "btn", href: modePath("/") + "?demo", textContent: "Watch the demo" }),
+        el("a", { class: "btn quiet", href: alternateModePath(), textContent: lite ? "Full graphics" : "Lite graphics (older TVs)" }),
       ),
       el(
         "div",
@@ -47,7 +49,7 @@ export function landingPage(root: HTMLElement): void {
         form(
           async () => {
             await api("/admin/login", "POST", { token: token.value });
-            location.href = "/";
+            location.href = modePath("/");
           },
           err,
           el("div", { class: "grow" }, token),
@@ -77,7 +79,7 @@ export function joinPage(root: HTMLElement, code: string): void {
         form(
           async () => {
             await api("/join", "POST", { code, name: name.value });
-            location.href = "/?connect";
+            location.href = modePath("/") + "?connect";
           },
           err,
           el("div", { class: "grow" }, name),
@@ -378,7 +380,7 @@ export async function adminPage(root: HTMLElement, me: Member): Promise<void> {
   const page = el("div", { class: "page" });
   root.replaceChildren(page);
   if (me.role !== "owner") {
-    page.append(el("div", { class: "box" }, el("p", { textContent: "Only the village owner can open this page." }), el("a", { href: "/", textContent: "Back to the battlefield" })));
+    page.append(el("div", { class: "box" }, el("p", { textContent: "Only the village owner can open this page." }), el("a", { href: modePath("/"), textContent: "Back to the battlefield" })));
     return;
   }
 
@@ -444,7 +446,7 @@ export async function adminPage(root: HTMLElement, me: Member): Promise<void> {
     void load().catch((e) => (err.textContent = e.message));
   };
 
-  page.append(el("div", { class: "box" }, el("h1", { textContent: "Village council" }), el("a", { href: "/", textContent: "Back to the battlefield" })));
+  page.append(el("div", { class: "box" }, el("h1", { textContent: "Village council" }), el("a", { href: modePath("/"), textContent: "Back to the battlefield" })));
   const day = (t: number) => new Date(t).toLocaleDateString();
   section(
     "Invite links",
@@ -461,7 +463,7 @@ export async function adminPage(root: HTMLElement, me: Member): Promise<void> {
   section("Spectator links", "/shares", "shares", (s) => `${s.label || "spectator"} - created ${day(s.created)}`, {
     placeholder: "Label, e.g. Living room TV",
     field: "label",
-    reveal: (r) => `${origin()}/watch/${r.token}`,
+    reveal: (r) => `${origin()}${modePath(`/watch/${r.token}`)}`,
     note: "Anyone with this link can watch (read-only) until you remove it. It is shown only now:",
   });
   section("Members", "/members", "members", (m) => `${m.name} (${m.role})`, undefined, (m) => m.role !== "owner");
