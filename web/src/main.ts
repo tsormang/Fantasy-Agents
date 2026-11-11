@@ -68,4 +68,4 @@ async function main(): Promise<void> {
   if (query.has("connect")) void connectModal(root);
 }
 
-void main();
+void main().then(() => window.dispatchEvent(new Event("fantasy-ready")));

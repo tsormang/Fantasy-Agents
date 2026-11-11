@@ -67,6 +67,22 @@ npm run typecheck
 `http://localhost:8787/?demo` shows scripted fake agents; add `&night=1` to force night lighting.
 Local owner sign-in uses `ADMIN_TOKEN` from `.dev.vars` (git-ignored).
 
+### Samsung TV browsers
+
+The production build includes a legacy JavaScript bundle targeting Chromium 56
+(Samsung's 2018 Tizen 4.0 generation) and newer. Lowering Vite's syntax target
+alone is insufficient: these TVs do not understand module scripts. The legacy
+plugin supplies the non-module loader and language polyfills; the client also
+provides missing DOM helpers, a size-observation fallback, and older CSS layouts.
+2015–2017 TVs are outside this target and require separate validation.
+
+For a TV, create a spectator link in **Council** on your PC and open that
+`/watch/...` link in the TV browser. This avoids entering the owner token on the TV.
+After deploying an update, reload the TV page (clear its browser cache if needed).
+Use `/?demo` to check rendering without signing in. Startup failures now show a
+message and the browser's user agent instead of leaving an empty screen.
+Real TV testing is still required; desktop browser tests cannot establish firmware compatibility.
+
 ## Deploy
 
 ```bash

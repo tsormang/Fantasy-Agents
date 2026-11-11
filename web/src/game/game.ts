@@ -1,5 +1,6 @@
 // Canvas, resize handling, render loop and ambient animation (water, foam, smoke, night).
 import type { Store } from "../store";
+import { observeSize } from "../resize";
 import { U, drawStrip, whenLoaded } from "./art";
 import { type Sprite, canvas } from "./pix";
 import { Sim } from "./sim";
@@ -78,7 +79,7 @@ export class Game {
     let pending = 0;
     // Observe the container (not just the window) so a pane that starts hidden or tiny still gets laid out.
     let seen = `${root.clientWidth}x${root.clientHeight}`;
-    new ResizeObserver(() => {
+    observeSize(root, () => {
       const size = `${root.clientWidth}x${root.clientHeight}`;
       if (size === seen) return;
       seen = size;
@@ -87,8 +88,8 @@ export class Game {
         this.layout();
         this.sim.setLayout(this.L);
       }, 120);
-    }).observe(root);
-    this.el.addEventListener("pointerdown", (e) => {
+    });
+    this.el.addEventListener("PointerEvent" in window ? "pointerdown" : "mousedown", (e) => {
       const r = this.el.getBoundingClientRect();
       const id = this.sim.pick((e.clientX - r.left) / this.unitCss, (e.clientY - r.top) / this.unitCss);
       this.select(id);

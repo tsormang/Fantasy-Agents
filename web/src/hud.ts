@@ -6,6 +6,7 @@ import { hash } from "./game/pix";
 import { img, loaded } from "./game/art";
 import { CLASS_LABEL, CLASS_OF, PC_COLORS } from "./game/sprites";
 import type { Store } from "./store";
+import { observeSize } from "./resize";
 
 const RANK: Record<string, number> = { waiting: 0, working: 1, stale: 2, idle: 3 };
 
@@ -41,7 +42,7 @@ export class Hud {
     root.append(bar, this.roster);
     // The bar wraps onto a second row on narrow screens, so the roster hangs below wherever it ends.
     const place = () => root.style.setProperty("--hud-top", `${bar.offsetTop + bar.offsetHeight}px`);
-    new ResizeObserver(place).observe(bar);
+    observeSize(bar, place);
     place();
     game.onSelect = (id) => {
       this.selected = id;

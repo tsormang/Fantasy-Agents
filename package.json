@@ -10,11 +10,12 @@
     "watch": "vite build --watch",
     "deploy": "vite build && wrangler deploy",
     "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.worker.json",
-    "test": "node --test test/connector.test.mjs && vitest run"
+    "test": "node --test test/*.test.mjs && vitest run"
   },
   "devDependencies": {
     "@cloudflare/vitest-pool-workers": "latest",
     "@cloudflare/workers-types": "latest",
+    "@vitejs/plugin-legacy": "^8.2.4",
     "typescript": "^5.6.0",
     "vite": "latest",
     "vitest": "latest",

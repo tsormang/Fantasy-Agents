@@ -11,14 +11,35 @@
     <link rel="stylesheet" href="/src/style.css" />
   </head>
   <body>
+    <div id="startup" role="status" style="position:fixed;top:24px;left:24px;right:24px;padding:16px;background:#2a2233;color:#f4efe6;font:18px monospace;z-index:999;white-space:pre-wrap">Loading Fantasy Agents…</div>
+    <noscript>This site requires JavaScript. Enable it in your TV browser settings.</noscript>
     <div id="app"></div>
     <script>
-      // If startup fails on an old browser, say so instead of leaving a blank screen.
+      // Keep this ES5 and outside the module graph: even an ignored entry script must be visible.
+      var startup = document.getElementById("startup");
+      var startupDone = false;
+      function startupError(message) {
+        startup.style.display = "block";
+        startup.textContent = "Fantasy Agents could not start.\n" + message +
+          "\nTry reloading this page. If it keeps failing, share this message and the browser information below.\n" + navigator.userAgent;
+      }
+      var startupTimer = setTimeout(function () {
+        if (!startupDone) startupError("Loading is taking too long. A script may be blocked or unsupported by this TV browser.");
+      }, 20000);
+      window.addEventListener("fantasy-ready", function () {
+        startupDone = true;
+        clearTimeout(startupTimer);
+        startup.style.display = "none";
+      });
       window.addEventListener("error", function (e) {
-        var d = document.createElement("pre");
-        d.style.cssText = "position:fixed;left:0;right:0;top:0;margin:0;padding:12px;background:#400;color:#fff;font:16px monospace;white-space:pre-wrap;z-index:99";
-        d.textContent = "Startup error: " + (e.message || "script failed to load") + " " + (e.filename || "") + ":" + (e.lineno || "");
-        document.body.appendChild(d);
+        if (startupDone) return;
+        clearTimeout(startupTimer);
+        startupError(e.message || "A script or resource failed to load.");
+      });
+      window.addEventListener("unhandledrejection", function (e) {
+        if (startupDone) return;
+        clearTimeout(startupTimer);
+        startupError(String(e.reason && e.reason.message || e.reason || "Startup failed."));
       });
     </script>
     <script type="module" src="/src/main.ts"></script>
