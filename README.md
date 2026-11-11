@@ -82,20 +82,22 @@ npm run deploy
 3. Choose which projects appear. A newly connected PC shares nothing. In each project folder you want on the battlefield:
 
    ```bash
-   node ~/.fantasy-agents/fa.mjs browse                    # pick folders in a folder window
-   node ~/.fantasy-agents/fa.mjs allow                     # the current folder
-   node ~/.fantasy-agents/fa.mjs allow path/to/project --as "side project"   # show an alias instead of the folder name
-   node ~/.fantasy-agents/fa.mjs list                      # what is reported
-   node ~/.fantasy-agents/fa.mjs disallow path/to/project  # or: disallow --all
-   node ~/.fantasy-agents/fa.mjs status                    # connection, reported folders, whether the current folder is reported
+   node "$HOME/.fantasy-agents/fa.mjs" browse                    # pick folders in a folder window
+   node "$HOME/.fantasy-agents/fa.mjs" allow                     # the current folder
+   node "$HOME/.fantasy-agents/fa.mjs" allow path/to/project --as "side project"   # show an alias instead of the folder name
+   node "$HOME/.fantasy-agents/fa.mjs" list                      # what is reported
+   node "$HOME/.fantasy-agents/fa.mjs" disallow path/to/project  # or: disallow --all
+   node "$HOME/.fantasy-agents/fa.mjs" status                    # connection, reported folders, whether the current folder is reported
    ```
+
+   The commands are written with `$HOME` so they work in PowerShell, bash and zsh (`~` does not work in Windows PowerShell). In the Windows Command Prompt use `%USERPROFILE%` instead.
 
    Allowing a folder covers its subfolders and its git worktrees, wherever those are on disk. Changes apply to the next event, also for sessions that are already running. An event is judged by the folder it happens in: if an agent leaves the allowed folder, its hero stops updating and fades. `connect` also offers to allow the folder it is run from. The folder window of `browse` opens on the PC itself (Windows, macOS, or Linux with zenity or kdialog); the web page cannot offer one, because browsers do not reveal folder paths and the list must not pass through the server.
 4. **Council** creates single-use invite links for other people and revocable read-only spectator links (`/watch/...`) for TVs or phones.
-5. To remove a PC: `node ~/.fantasy-agents/fa.mjs disconnect`, and revoke it under Connect PC.
+5. To remove a PC: `node "$HOME/.fantasy-agents/fa.mjs" disconnect`, and revoke it under Connect PC.
 
 Hook files touched: `~/.claude/settings.json`, `~/.codex/hooks.json`, `~/.cursor/hooks.json`. For Cursor only after-the-fact events are used, so the connector can never block an action. Codex silently skips new hooks until you trust them (desktop app: **Settings > Hooks**; CLI: `/hooks`), then start a new chat.
 
 ### Updating a PC connected before the allow-list
 
-Older connectors reported every folder on the PC. The server now refuses their events and forgets their heroes, and Connect PC marks such a PC as out of date and shows a one-line update command. With a connector that already has it, `node ~/.fantasy-agents/fa.mjs update` does the same. The connection and hooks are kept; after updating, the PC reports nothing until you `allow` folders. Until a PC is updated, its old connector still posts events for every folder to the village server, which discards them; run `disconnect` on a PC you cannot update yet.
+Older connectors reported every folder on the PC. The server now refuses their events and forgets their heroes, and Connect PC marks such a PC as out of date and shows a one-line update command. With a connector that already has it, `node "$HOME/.fantasy-agents/fa.mjs" update` does the same. The connection and hooks are kept; after updating, the PC reports nothing until you `allow` folders. Until a PC is updated, its old connector still posts events for every folder to the village server, which discards them; run `disconnect` on a PC you cannot update yet.

@@ -165,8 +165,8 @@ export function updateCommand(base: string): string {
   );
 }
 
-const ALLOW_CMD = "node ~/.fantasy-agents/fa.mjs allow";
-const BROWSE_CMD = "node ~/.fantasy-agents/fa.mjs browse";
+const ALLOW_CMD = 'node "$HOME/.fantasy-agents/fa.mjs" allow';
+const BROWSE_CMD = 'node "$HOME/.fantasy-agents/fa.mjs" browse';
 
 export async function connectModal(root: HTMLElement): Promise<void> {
   const intro = el("div", {});
@@ -309,7 +309,14 @@ export async function connectModal(root: HTMLElement): Promise<void> {
       }),
       ...rows,
       el("p", { class: "dim", textContent: "If nothing arrives at all, run this on that PC to check it can reach the server and to see which folders it reports:" }),
-      el("code", { class: "cmd", textContent: "node ~/.fantasy-agents/fa.mjs status" }),
+      el("code", { class: "cmd", textContent: 'node "$HOME/.fantasy-agents/fa.mjs" status' }),
+      ...(outdated
+        ? []
+        : [
+            el("p", { class: "dim", textContent: 'If a command above is unknown on that PC (for example "browse"), its connector is older than this page. Run this there to update it:' }),
+            el("div", { class: "row" }, el("code", { class: "cmd grow", textContent: update }), copyButton(() => update)),
+          ]),
+      el("p", { class: "dim", textContent: "These commands work in PowerShell, bash and zsh. In the old Windows Command Prompt, replace $HOME with %USERPROFILE%." }),
     );
   };
 
