@@ -260,7 +260,13 @@ async function ping() {
   const cfg = loadConfig();
   if (!cfg) return "not connected";
   try {
-    const res = await fetch(`${cfg.url}/api/ping`, { method: "POST", headers: { Authorization: `Bearer ${cfg.token}` }, signal: AbortSignal.timeout(5000) });
+    const res = await fetch(`${cfg.url}/api/ping`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${cfg.token}` },
+      // tell the server which tools have our hooks, so its checklist is accurate
+      body: JSON.stringify({ agents: Object.keys(AGENTS).filter(installed) }),
+      signal: AbortSignal.timeout(5000),
+    });
     if (res.ok) return "ok";
     return res.status === 401 ? "this PC was revoked on the server; run connect again" : `server answered ${res.status}`;
   } catch {

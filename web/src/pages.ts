@@ -124,6 +124,8 @@ interface Device {
   name: string;
   owner: string;
   created: number;
+  /** false for PCs paired before the connector reported its tools */
+  reported: number;
   agents: { agent: string; seen: number | null }[];
 }
 
@@ -155,13 +157,19 @@ export async function connectModal(root: HTMLElement): Promise<void> {
     const rows = TOOLS.map((t) => {
       const entry = d.agents.find((a) => a.agent === t.agent);
       const passed = passedFor(t.agent);
-      const state = !entry ? "Not set up on this PC" : passed ? "OK - hero summoned" : "Waiting for a prompt...";
+      const unknown = !entry && !d.reported;
+      const state = unknown ? "Not heard from yet" : !entry ? "Not set up on this PC" : passed ? "OK - hero summoned" : "Waiting for a prompt...";
       const item = el(
         "div",
-        { class: `check ${passed ? "ok" : entry ? "wait" : "off"}` },
+        { class: `check ${passed ? "ok" : entry || unknown ? "wait" : "off"}` },
         el("div", { class: "row" }, el("b", { class: "grow", textContent: t.label }), el("span", { class: "state", textContent: state })),
       );
-      if (!entry) {
+      if (unknown) {
+        item.append(
+          el("p", { class: "dim", textContent: "This PC was connected with an older connector, so it is not known whether this tool is set up. Run the status command below on that PC to refresh, or just try it:" }),
+          el("ol", {}, ...t.steps.map((s) => el("li", { textContent: s }))),
+        );
+      } else if (!entry) {
         item.append(el("p", { class: "dim", textContent: "The connector did not find this tool here. If you install it later, run the two commands again." }));
       } else if (!passed) {
         if (entry.seen) item.append(el("p", { class: "dim", textContent: `Last heard from it ${ago(now - entry.seen)} ago. Send a prompt to test again.` }));
@@ -169,7 +177,7 @@ export async function connectModal(root: HTMLElement): Promise<void> {
       }
       return item;
     });
-    const done = TOOLS.every((t) => !d.agents.some((a) => a.agent === t.agent) || passedFor(t.agent));
+    const done = TOOLS.every((t) => (d.agents.some((a) => a.agent === t.agent) ? passedFor(t.agent) : !!d.reported));
     checklist.replaceChildren(
       el("h2", { textContent: `Test "${d.name}"` }),
       el("p", {

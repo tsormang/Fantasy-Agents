@@ -58,6 +58,12 @@ export class Realm extends DurableObject<Env> {
       CREATE TABLE IF NOT EXISTS agents (id TEXT PRIMARY KEY, device_id TEXT NOT NULL, agent TEXT NOT NULL, project TEXT NOT NULL,
         status TEXT NOT NULL, activity TEXT, since INTEGER NOT NULL, last INTEGER NOT NULL, kills INTEGER NOT NULL);
     `);
+    try {
+      // Added after the first release: whether the connector told us which tools it set up.
+      this.sql.exec("ALTER TABLE devices ADD COLUMN reported INTEGER NOT NULL DEFAULT 0");
+    } catch {
+      /* column already exists */
+    }
     ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair("ping", "pong"));
   }
 
@@ -260,8 +266,7 @@ export class Realm extends DurableObject<Env> {
       now,
     );
     // Which agent tools the connector is installing hooks for, so the UI can offer a per-agent test.
-    const kinds = Array.isArray(b.agents) ? AGENT_KINDS.filter((k) => (b.agents as unknown[]).includes(k)) : [];
-    for (const k of kinds) this.sql.exec("INSERT OR IGNORE INTO device_agents (device_id, agent, installed, seen) VALUES (?, ?, 1, NULL)", id, k);
+    this.reportAgents(id, b.agents);
     return json({ token, deviceId: id, pc });
   }
 
@@ -271,12 +276,21 @@ export class Realm extends DurableObject<Env> {
     const device = token ? this.sql.exec("SELECT id, name FROM devices WHERE hash = ?", await hashToken(token)).toArray()[0] : null;
     if (!device) return err(401, "Unknown or revoked device");
     this.sql.exec("UPDATE devices SET last_seen = ? WHERE id = ?", Date.now(), device.id);
+    this.reportAgents(device.id as string, (await body(req)).agents);
     return json({ ok: true, pc: device.name });
+  }
+
+  /** The connector's list of tools it has hooks in. Without it we cannot tell "not set up" from "not heard from yet". */
+  private reportAgents(deviceId: string, agents: unknown): void {
+    if (!Array.isArray(agents)) return;
+    for (const k of AGENT_KINDS.filter((x) => agents.includes(x)))
+      this.sql.exec("INSERT OR IGNORE INTO device_agents (device_id, agent, installed, seen) VALUES (?, ?, 1, NULL)", deviceId, k);
+    this.sql.exec("UPDATE devices SET reported = 1 WHERE id = ?", deviceId);
   }
 
   private listDevices(me: Member): Response {
     const q =
-      "SELECT d.id, d.name, d.created, d.last_seen, m.name AS owner FROM devices d JOIN members m ON m.id = d.member_id";
+      "SELECT d.id, d.name, d.created, d.last_seen, d.reported, m.name AS owner FROM devices d JOIN members m ON m.id = d.member_id";
     const devices =
       me.role === "owner"
         ? this.sql.exec(`${q} ORDER BY d.created`).toArray()
