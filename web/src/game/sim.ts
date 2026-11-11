@@ -1,11 +1,14 @@
 // Cosmetic battle simulation: heroes mirror agent state, enemies exist to be fought.
 import type { Activity, AgentState } from "../../../shared/protocol";
+import { ago } from "../dom";
 import { type Strip, U, drawStrip, frameCount, img, loaded } from "./art";
+import { describe } from "./describe";
 import { type Sprite, hash, textSprite } from "./pix";
 import {
   ARROW,
   BOOM,
   BUBBLE,
+  CLASS_LABEL,
   CLASS_OF,
   type CharSprites,
   DUST,
@@ -113,7 +116,11 @@ const busy = (a: AgentState) => a.status !== "idle";
 const dist = (a: Pt, b: Pt) => Math.hypot(a.x - b.x, a.y - b.y);
 /** Name ribbons: drawn at this scale from the pack's small ribbons, one pair of 64px rows per faction colour. */
 const RIBBON = 0.56;
-const LABEL_FONT = '700 5px ui-monospace, "Cascadia Mono", Consolas, Menlo, monospace';
+const FONT = 'ui-monospace, "Cascadia Mono", Consolas, Menlo, monospace';
+const LABEL_FONT = `700 5px ${FONT}`;
+/** Speech bubble colours, sampled from the pack's paper. */
+const PAPER = "#eee1c6";
+const PAPER_EDGE = "#161c2e";
 /** Ink that reads on each faction's ribbon (blue, red, yellow, purple). */
 const RIBBON_INK = ["#ffffff", "#ffffff", "#3a2d2a", "#ffffff"];
 const LABEL: Record<string, string> = { working: "#ffe9a8", waiting: "#ff9a80", idle: "#d8e6f4", stale: "#9aa3ad" };
@@ -131,6 +138,7 @@ export class Sim {
   private wisp: Sprite = WISP();
   private bubble: Sprite = BUBBLE();
   private t = 0;
+  private now = 0;
 
   constructor(public L: Layout) {}
 
@@ -255,6 +263,7 @@ export class Sim {
 
   update(dt: number, now: number): void {
     this.t += dt;
+    this.now = now;
     this.shake = Math.max(0, this.shake - dt * 12);
 
     for (const h of this.heroes.values()) {
@@ -528,8 +537,11 @@ export class Sim {
 
   // ------------------------------------------------------------------ draw
 
-  /** `px` is device pixels per world unit, used to keep the chunky overlays on whole pixels. */
-  draw(g: CanvasRenderingContext2D, props: Prop[], px: number): void {
+  /**
+   * `px` is device pixels per world unit, used to keep the chunky overlays on whole pixels;
+   * `cssPx` is CSS pixels per world unit, used to keep the speech bubble readable on small screens.
+   */
+  draw(g: CanvasRenderingContext2D, props: Prop[], px: number, cssPx: number): void {
     type Item = { y: number; hero?: Hero; enemy?: Enemy; prop?: Prop };
     const items: Item[] = props.map((prop) => ({ y: prop.y, prop }));
     for (const h of this.heroes.values()) items.push({ y: h.y, hero: h });
@@ -579,7 +591,83 @@ export class Sim {
 
     g.imageSmoothingEnabled = false;
     for (const h of this.heroes.values()) this.drawLabel(g, h, snap);
+    const sel = this.selected ? this.heroes.get(this.selected) : undefined;
+    if (sel) this.drawBubble(g, sel, snap, cssPx);
     g.imageSmoothingEnabled = smooth;
+  }
+
+  /** Speech bubble over the selected hero saying what its agent is doing. */
+  private drawBubble(g: CanvasRenderingContext2D, h: Hero, snap: (v: number) => number, cssPx: number): void {
+    const a = h.a;
+    // at least 11 CSS pixels tall, whatever the zoom
+    const f1 = Math.max(4.5, 11 / cssPx);
+    const f2 = f1 * 0.85;
+    const line1 = describe(a) + (a.status === "working" && a.kills ? ` - ${a.kills} slain` : "");
+    const line2 = `${CLASS_LABEL[h.cls]} (${a.agent}) on ${a.pc} - ${ago(this.now - a.since)}`;
+    const font1 = `700 ${f1}px ${FONT}`;
+    const font2 = `400 ${f2}px ${FONT}`;
+    g.font = font1;
+    const w1 = g.measureText(line1).width;
+    g.font = font2;
+    const w2 = g.measureText(line2).width;
+    const pad = f1 * 0.8;
+    const w = Math.max(w1, w2) + pad * 2;
+    const ht = f1 + f2 + f1 * 0.4 + pad * 1.7;
+    const tail = f1 * 0.9;
+
+    // above the name ribbon, or below the hero when there is no room; kept on screen sideways
+    const x = snap(Math.max(2, Math.min(this.L.W - 2 - w, h.x - w / 2)));
+    let y = h.y - h.spr.h - 11 - tail - ht;
+    const below = y < 2;
+    if (below) y = h.y + 3 + tail;
+    y = snap(y);
+
+    const paper = img("ui_paper");
+    if (loaded(paper)) {
+      // nine pieces of the pack's paper: 52x44 corners (trimmed of their padding) drawn c units wide
+      const c = f1 * 0.9;
+      const k = c / 52;
+      const sx = [12, 128, 256];
+      const sw = [52, 64, 52];
+      const sy = [20, 128, 256];
+      const sh = [44, 64, 45];
+      const dx = [x, x + c, x + w - c];
+      const dw = [c, w - c * 2, c];
+      const dy = [y, y + 44 * k, y + ht - 45 * k];
+      const dh = [44 * k, ht - 89 * k, 45 * k];
+      g.imageSmoothingEnabled = true;
+      for (let r = 0; r < 3; r++) for (let q = 0; q < 3; q++) g.drawImage(paper, sx[q], sy[r], sw[q], sh[r], dx[q], dy[r], dw[q] + 0.05, dh[r] + 0.05);
+      g.imageSmoothingEnabled = false;
+    } else {
+      g.fillStyle = PAPER_EDGE;
+      g.fillRect(x - 0.4, y - 0.4, w + 0.8, ht + 0.8);
+      g.fillStyle = PAPER;
+      g.fillRect(x, y, w, ht);
+    }
+
+    // tail pointing at the hero
+    const tx = Math.max(x + tail * 1.6, Math.min(x + w - tail * 1.6, h.x));
+    const base = below ? y + 0.5 : y + ht - 0.5;
+    const tip = below ? y - tail : y + ht + tail;
+    g.beginPath();
+    g.moveTo(tx - tail * 0.8, base);
+    g.lineTo(tx, tip);
+    g.lineTo(tx + tail * 0.8, base);
+    g.fillStyle = PAPER;
+    g.fill();
+    g.strokeStyle = PAPER_EDGE;
+    g.lineWidth = Math.max(0.3, f1 * 0.07);
+    g.lineJoin = "round";
+    g.stroke();
+
+    g.textAlign = "left";
+    g.textBaseline = "top";
+    g.font = font1;
+    g.fillStyle = "#3a2d2a";
+    g.fillText(line1, x + pad, y + pad * 0.85);
+    g.font = font2;
+    g.fillStyle = "#7d6a56";
+    g.fillText(line2, x + pad, y + pad * 0.85 + f1 * 1.4);
   }
 
   private drawChar(
@@ -665,7 +753,8 @@ export class Sim {
       g.fillText(name, h.x, y0 + cap * 0.44);
       g.globalAlpha = 1;
     }
-    if (h.a.status === "waiting") {
+    // the selected hero's speech bubble takes the badge's place
+    if (h.a.status === "waiting" && this.selected !== h.id) {
       const bob = Math.sin(this.t * 5) > 0 ? 1 : 0;
       const badge = img("ui_badge_red");
       if (!loaded(badge)) {

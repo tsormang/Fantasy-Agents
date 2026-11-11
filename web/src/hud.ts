@@ -1,27 +1,11 @@
 import type { AgentState } from "../../shared/protocol";
 import { ago, el } from "./dom";
+import { describe } from "./game/describe";
 import type { Game } from "./game/game";
 import { hash } from "./game/pix";
 import { img, loaded } from "./game/art";
 import { CLASS_LABEL, CLASS_OF, PC_COLORS } from "./game/sprites";
 import type { Store } from "./store";
-
-const VERB: Record<string, string> = {
-  edit: "Forging code",
-  command: "Casting a command",
-  search: "Scouting the codebase",
-  read: "Studying scrolls",
-  web: "Consulting the oracle",
-  subagent: "Summoning a familiar",
-  think: "Plotting the next move",
-};
-
-function describe(a: AgentState): string {
-  if (a.status === "idle") return "Resting in the village";
-  if (a.status === "waiting") return "Awaits your word";
-  if (a.status === "stale") return "Lost in the fog";
-  return VERB[a.activity ?? "think"] ?? "Fighting";
-}
 
 const RANK: Record<string, number> = { waiting: 0, working: 1, stale: 2, idle: 3 };
 
@@ -61,7 +45,8 @@ export class Hud {
     place();
     game.onSelect = (id) => {
       this.selected = id;
-      if (id) this.roster.hidden = false;
+      // on phones the roster would cover the hero's speech bubble, so it stays as it was
+      if (id && window.innerWidth >= 700) this.roster.hidden = false;
       this.render();
     };
     store.onChange(() => this.render());

@@ -149,7 +149,7 @@ export class Game {
     g.drawImage(this.land, 0, 0, L.W, L.H);
     for (const p of L.afloat) p.draw(g, t);
 
-    this.sim.draw(g, L.props, s);
+    this.sim.draw(g, L.props, s, this.unitCss);
 
     // chimney smoke
     if (Math.random() < dt * 1.6 && L.chimneys.length) {
