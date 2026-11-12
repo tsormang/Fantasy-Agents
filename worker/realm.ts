@@ -14,17 +14,20 @@ import { COOKIE, bearer, hashToken, newId, newToken, readCookie, sameOrigin, ses
 import type { Env } from "./index";
 import { NAME_CATEGORIES, nameCategory, randomAgentName, type NameCategory } from "../shared/names";
 import { isPcColor } from "../shared/colors";
+import { RequestError, SESSION_MAX_AGE_S, readBody as body } from "./security";
 
-const YEAR_S = 365 * 24 * 3600;
 const PAIR_TTL_MS = 10 * 60_000;
 const ALARM_EVERY_MS = 60_000;
+const MAX_SOCKETS_PER_VIEWER = 16;
 
 interface Member {
   id: string;
   name: string;
   role: "owner" | "member";
 }
-type Viewer = { kind: "member"; member: Member } | { kind: "spectator" };
+type Session = { member: Member; hash: string; expiresAt: number };
+type Viewer = { kind: "member"; session: Session } | { kind: "spectator" };
+type SocketAccess = { kind: "member"; hash: string; expiresAt: number } | { kind: "spectator"; id: string };
 
 const json = (data: unknown, status = 200, headers: Record<string, string> = {}): Response =>
   new Response(JSON.stringify(data), {
@@ -32,17 +35,6 @@ const json = (data: unknown, status = 200, headers: Record<string, string> = {})
     headers: { "Content-Type": "application/json", "Cache-Control": "no-store", ...headers },
   });
 const err = (status: number, message: string): Response => json({ error: message }, status);
-
-async function body(req: Request): Promise<Record<string, unknown>> {
-  try {
-    const text = await req.text();
-    if (text.length > 4096) return {};
-    const v = JSON.parse(text);
-    return v && typeof v === "object" ? v : {};
-  } catch {
-    return {};
-  }
-}
 
 export class Realm extends DurableObject<Env> {
   private sql: SqlStorage;
@@ -53,6 +45,9 @@ export class Realm extends DurableObject<Env> {
     this.sql.exec(`
       CREATE TABLE IF NOT EXISTS members (id TEXT PRIMARY KEY, name TEXT NOT NULL, role TEXT NOT NULL, created INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS sessions (hash TEXT PRIMARY KEY, member_id TEXT NOT NULL, created INTEGER NOT NULL);
+      CREATE TABLE IF NOT EXISTS rate_limits (key TEXT PRIMARY KEY, window INTEGER NOT NULL, count INTEGER NOT NULL);
+      CREATE INDEX IF NOT EXISTS rate_limits_window ON rate_limits (window);
+      CREATE INDEX IF NOT EXISTS sessions_created ON sessions (created);
       CREATE TABLE IF NOT EXISTS invites (id TEXT PRIMARY KEY, hash TEXT NOT NULL UNIQUE, note TEXT NOT NULL, expires INTEGER NOT NULL, used_by TEXT);
       CREATE TABLE IF NOT EXISTS pairings (hash TEXT PRIMARY KEY, member_id TEXT NOT NULL, expires INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS devices (id TEXT PRIMARY KEY, hash TEXT NOT NULL UNIQUE, member_id TEXT NOT NULL, name TEXT NOT NULL, created INTEGER NOT NULL, last_seen INTEGER NOT NULL);
@@ -90,6 +85,8 @@ export class Realm extends DurableObject<Env> {
     const path = url.pathname.replace(/^\/api/, "");
     const m = req.method;
     try {
+      const rate = await this.limitRequest(req, path);
+      if (rate) return rate;
       if (path === "/events" && m === "POST") return await this.postEvent(req);
       if (path === "/connect" && m === "POST") return await this.connectDevice(req);
       if (path === "/ping" && m === "POST") return await this.ping(req);
@@ -141,6 +138,7 @@ export class Realm extends DurableObject<Env> {
 
       return err(404, "Not found");
     } catch (e) {
+      if (e instanceof RequestError) return err(e.status, e.message);
       console.error(e);
       return err(500, "Internal error");
     }
@@ -148,16 +146,52 @@ export class Realm extends DurableObject<Env> {
 
   // ------------------------------------------------------------------- auth
 
-  private async member(req: Request): Promise<Member | null> {
+  /** Fixed one-minute windows persist through hibernation; raw client IPs are not stored. */
+  private async limitRequest(req: Request, path: string): Promise<Response | null> {
+    const auth = req.method === "POST" && ["/admin/login", "/join", "/connect"].includes(path);
+    const group = auth ? "auth" : path === "/ws" ? "socket" : "api";
+    const limit = auth ? 20 : group === "socket" ? 60 : 600;
+    const now = Date.now();
+    const window = Math.floor(now / 60_000) * 60_000;
+    const key = await hashToken(`${group}:${req.headers.get("CF-Connecting-IP") ?? "local"}`);
+    this.sql.exec("DELETE FROM rate_limits WHERE window < ?", window);
+    const row = this.sql.exec(
+      `INSERT INTO rate_limits (key, window, count) VALUES (?, ?, 1)
+       ON CONFLICT(key) DO UPDATE SET window = excluded.window, count = MIN(rate_limits.count + 1, ?)
+       RETURNING count`, key, window, limit + 1,
+    ).one();
+    return Number(row.count) > limit
+      ? json({ error: "Too many requests; try again shortly" }, 429, { "Retry-After": String(Math.ceil((window + 60_000 - now) / 1000)) })
+      : null;
+  }
+
+  private async session(req: Request): Promise<Session | null> {
     const token = readCookie(req, COOKIE);
     if (!token) return null;
+    const hash = await hashToken(token);
     const rows = this.sql
       .exec(
-        "SELECT m.id, m.name, m.role FROM sessions s JOIN members m ON m.id = s.member_id WHERE s.hash = ?",
-        await hashToken(token),
+        "SELECT m.id, m.name, m.role, s.created FROM sessions s JOIN members m ON m.id = s.member_id WHERE s.hash = ?",
+        hash,
       )
       .toArray();
-    return rows.length ? (rows[0] as unknown as Member) : null;
+    const row = rows[0];
+    if (!row) return null;
+    const expiresAt = Number(row.created) + SESSION_MAX_AGE_S * 1000;
+    if (expiresAt <= Date.now()) {
+      this.revokeSession(hash);
+      return null;
+    }
+    return { member: { id: String(row.id), name: String(row.name), role: row.role as Member["role"] }, hash, expiresAt };
+  }
+
+  private async member(req: Request): Promise<Member | null> {
+    return (await this.session(req))?.member ?? null;
+  }
+
+  private revokeSession(hash: string): void {
+    this.sql.exec("DELETE FROM sessions WHERE hash = ?", hash);
+    this.closeSockets((tag) => tag === `session:${hash}`);
   }
 
   private async viewer(req: Request, url: URL): Promise<(Viewer & { tag: string }) | null> {
@@ -166,14 +200,14 @@ export class Realm extends DurableObject<Env> {
       const rows = this.sql.exec("SELECT id FROM shares WHERE hash = ?", await hashToken(watch)).toArray();
       return rows.length ? { kind: "spectator", tag: `share:${rows[0].id}` } : null;
     }
-    const me = await this.member(req);
-    return me ? { kind: "member", member: me, tag: `member:${me.id}` } : null;
+    const session = await this.session(req);
+    return session ? { kind: "member", session, tag: `member:${session.member.id}` } : null;
   }
 
   private async startSession(memberId: string): Promise<string> {
     const token = newToken();
     this.sql.exec("INSERT INTO sessions (hash, member_id, created) VALUES (?, ?, ?)", await hashToken(token), memberId, Date.now());
-    return sessionCookie(token, YEAR_S);
+    return sessionCookie(token, SESSION_MAX_AGE_S);
   }
 
   private async adminLogin(req: Request): Promise<Response> {
@@ -204,7 +238,8 @@ export class Realm extends DurableObject<Env> {
 
   private async logout(req: Request): Promise<Response> {
     const token = readCookie(req, COOKIE);
-    if (token) this.sql.exec("DELETE FROM sessions WHERE hash = ?", await hashToken(token));
+    if (token) this.revokeSession(await hashToken(token));
+    await this.scheduleAlarm();
     return json({ ok: true }, 200, { "Set-Cookie": sessionCookie("", 0) });
   }
 
@@ -481,7 +516,7 @@ export class Realm extends DurableObject<Env> {
     this.sql.exec("UPDATE agents SET hero_name = ?, name_category = ? WHERE id = ?", heroName, category, id);
     const agent = this.agents(id)[0];
     if (agent) this.broadcast({ t: "agent", agent, now });
-    if ((await this.ctx.storage.getAlarm()) === null) await this.ctx.storage.setAlarm(now + ALARM_EVERY_MS);
+    await this.scheduleAlarm();
     return json({ ok: true });
   }
 
@@ -495,6 +530,9 @@ export class Realm extends DurableObject<Env> {
   /** Heroes whose PC went quiet fade to "stale", then leave. */
   async alarm(): Promise<void> {
     const now = Date.now();
+    this.sql.exec("DELETE FROM sessions WHERE created <= ?", now - SESSION_MAX_AGE_S * 1000);
+    this.sql.exec("DELETE FROM rate_limits WHERE window < ?", Math.floor(now / 60_000) * 60_000);
+    for (const ws of this.ctx.getWebSockets()) this.socketAuthorized(ws);
     this.sql.exec("DELETE FROM dismissed_agents WHERE removed < ?", now - DROP_IDLE_AFTER_MS);
     for (const a of this.agents()) {
       const quiet = now - a.last;
@@ -507,25 +545,33 @@ export class Realm extends DurableObject<Env> {
         this.broadcast({ t: "agent", agent: { ...a, status: "stale" }, now });
       }
     }
-    const left = this.sql.exec("SELECT COUNT(*) AS n FROM agents").one().n as number;
-    if (left > 0) await this.ctx.storage.setAlarm(now + ALARM_EVERY_MS);
+    await this.scheduleAlarm();
   }
 
   // ------------------------------------------------------------- websockets
 
   private async openSocket(req: Request, url: URL): Promise<Response> {
     if (req.headers.get("Upgrade") !== "websocket") return err(426, "WebSocket expected");
+    if (!sameOrigin(req)) return err(403, "Cross-origin request refused");
     const viewer = await this.viewer(req, url);
     if (!viewer) return err(401, "Not allowed to watch");
+    const connections = this.ctx.getWebSockets(viewer.tag).filter((ws) => this.socketAuthorized(ws) && ws.readyState === WebSocket.OPEN);
+    if (connections.length >= MAX_SOCKETS_PER_VIEWER) return err(429, "Too many live connections");
     const pair = new WebSocketPair();
-    this.ctx.acceptWebSocket(pair[1], [viewer.tag]);
+    const access: SocketAccess = viewer.kind === "member"
+      ? { kind: "member", hash: viewer.session.hash, expiresAt: viewer.session.expiresAt }
+      : { kind: "spectator", id: viewer.tag.slice("share:".length) };
+    this.ctx.acceptWebSocket(pair[1], [viewer.tag, ...(access.kind === "member" ? [`session:${access.hash}`] : [])]);
+    pair[1].serializeAttachment(access);
+    await this.scheduleAlarm();
     const snapshot: ServerMsg = { t: "snapshot", agents: this.agents(), now: Date.now() };
     pair[1].send(JSON.stringify(snapshot));
     return new Response(null, { status: 101, webSocket: pair[0] });
   }
 
-  webSocketMessage(): void {
+  webSocketMessage(ws: WebSocket): void {
     // Viewers are read-only; "ping" is answered by the auto-response without waking us.
+    this.socketAuthorized(ws);
   }
 
   webSocketClose(ws: WebSocket, code: number): void {
@@ -539,11 +585,44 @@ export class Realm extends DurableObject<Env> {
   private broadcast(msg: ServerMsg): void {
     const text = JSON.stringify(msg);
     for (const ws of this.ctx.getWebSockets()) {
+      if (!this.socketAuthorized(ws)) continue;
       try {
         ws.send(text);
       } catch {
         /* socket is gone */
       }
+    }
+  }
+
+  /** Attachments survive hibernation. Legacy sockets must reconnect to acquire session tags. */
+  private socketAuthorized(ws: WebSocket): boolean {
+    const access = ws.deserializeAttachment() as SocketAccess | null;
+    let valid = false;
+    if (access?.kind === "member" && access.expiresAt > Date.now()) {
+      valid = this.sql.exec("SELECT hash FROM sessions WHERE hash = ? AND created > ?", access.hash, Date.now() - SESSION_MAX_AGE_S * 1000).toArray().length > 0;
+    } else if (access?.kind === "spectator") {
+      valid = this.sql.exec("SELECT id FROM shares WHERE id = ?", access.id).toArray().length > 0;
+    }
+    if (!valid) {
+      try { ws.close(access ? 4001 : 1012, "Authentication expired; reconnect"); } catch { /* already closed */ }
+    }
+    return valid;
+  }
+
+  private async scheduleAlarm(): Promise<void> {
+    const now = Date.now();
+    const activeAgents = Number(this.sql.exec("SELECT COUNT(*) AS n FROM agents").one().n) > 0;
+    let next = activeAgents ? now + ALARM_EVERY_MS : Infinity;
+    for (const ws of this.ctx.getWebSockets()) {
+      if (ws.readyState !== WebSocket.OPEN) continue;
+      const access = ws.deserializeAttachment() as SocketAccess | null;
+      if (access?.kind === "member") next = Math.min(next, Math.max(now + 1, access.expiresAt));
+    }
+    const current = await this.ctx.storage.getAlarm();
+    if (!Number.isFinite(next)) {
+      if (current !== null) await this.ctx.storage.deleteAlarm();
+    } else if (current === null || current <= now || current > next) {
+      await this.ctx.storage.setAlarm(next);
     }
   }
 

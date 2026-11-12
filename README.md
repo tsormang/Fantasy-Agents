@@ -121,6 +121,28 @@ npx wrangler secret put ADMIN_TOKEN   # choose a long random owner token
 npm run deploy
 ```
 
+### Security defaults
+
+Sessions expire on the server after one year, matching the cookie lifetime.
+Logging out revokes that browser session and closes its live connections; other
+signed-in browsers keep their own sessions. Expired live connections are closed
+even when there are no active agents. Browser WebSocket requests must come from
+the deployment's own origin, and each member or spectator link is limited to
+16 simultaneous live connections.
+
+API JSON bodies are limited to 4 KiB while streaming. Per client IP, one-minute
+rate limits allow 20 authentication requests (login, join and PC pairing combined),
+60 WebSocket handshake requests, and 600 other API requests. Exceeding a rate
+limit returns HTTP 429 with `Retry-After`. These counters survive Worker
+hibernation and store hashed keys rather than raw IP addresses. Users behind the
+same public IP share these limits. Keep the dependency lockfile current and run
+`npm audit` when updating dependencies.
+
+Local secrets belong in ignored `.dev.vars` or `.env` files. Before publishing
+commits, configure Git with your GitHub-provided `noreply` email address if you
+want to keep your personal email private. Changing the setting does not remove
+email addresses or deployment URLs from existing commits.
+
 ## Use
 
 1. Open the site and sign in with the owner token.

@@ -44,7 +44,7 @@ export function sameOrigin(req: Request): boolean {
   const origin = req.headers.get("Origin");
   if (!origin) return true; // non-browser client; cookies are SameSite=Lax anyway
   try {
-    return new URL(origin).host === new URL(req.url).host;
+    return new URL(origin).origin === new URL(req.url).origin;
   } catch {
     return false;
   }

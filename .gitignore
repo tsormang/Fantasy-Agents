@@ -2,6 +2,10 @@ node_modules/
 dist/
 .wrangler/
 .dev.vars
+.dev.vars.*
+.env
+.env.*
+!.env.example
 *.log
 /fa.mjs
 # full Tiny Swords download; the game uses the subset in web/src/assets/ts

@@ -1,12 +1,14 @@
 import { SELF, env, runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import type { ServerMsg } from "../shared/protocol";
 import { NAME_CATEGORIES, randomAgentName } from "../shared/names";
 
 const BASE = "https://realm.test";
+let client = 0;
+beforeEach(() => { client++; });
 
 async function api(path: string, init: { method?: string; cookie?: string; bearer?: string; body?: unknown } = {}) {
-  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  const headers: Record<string, string> = { "Content-Type": "application/json", "CF-Connecting-IP": `192.0.2.${client}` };
   if (init.cookie) headers.Cookie = init.cookie;
   if (init.bearer) headers.Authorization = `Bearer ${init.bearer}`;
   const res = await SELF.fetch(`${BASE}/api${path}`, {
