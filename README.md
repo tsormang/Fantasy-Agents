@@ -50,6 +50,8 @@ Who sees what: every signed-in member **and everyone holding a spectator link** 
 
 ## Get the sprites
 
+For all six packs, exact extraction paths, verification steps, and a copyable coding-agent prompt, see **[Complete sprite setup](docs/SPRITE_SETUP.md)**.
+
 The art is not in this repository. Tiny Swords is free to use, but its licence does not allow the files to be redistributed, so each person downloads their own copy. Without it the project still builds, but the battlefield shows only water and name labels.
 
 1. Open <https://pixelfrog-assets.itch.io/tiny-swords> and choose **Download Now** (the price is pay-what-you-want; "No thanks, just take me to the downloads" is fine).
