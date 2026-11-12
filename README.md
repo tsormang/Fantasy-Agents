@@ -79,7 +79,7 @@ Local owner sign-in uses `ADMIN_TOKEN` from `.dev.vars` (git-ignored).
 
 ### Lightweight graphics
 
-Open **https://fantasy-agents.tsormang.workers.dev/lite** for the original
+Open **`/lite` on your own deployment** for the original
 code-drawn pixel graphics. The normal `/` site keeps the Tiny Swords art.
 Use **Lite graphics** / **Full graphics** on the battlefield or sign-in page
 to switch. Lite uses a low-resolution canvas, caps rendering at 30 FPS, pauses
@@ -87,7 +87,7 @@ rendering in hidden tabs, and skips all Tiny Swords image and UI downloads.
 It shares the same sign-in, live agents and connected PCs.
 
 For a TV spectator link, insert `/lite` before `/watch/...`:
-`https://fantasy-agents.tsormang.workers.dev/lite/watch/YOUR_TOKEN`.
+`/lite/watch/YOUR_TOKEN` on your own deployment.
 Demo: `/lite?demo`; forced night: `/lite?demo&night=1`.
 Lite reduces graphics work; the browser compatibility target below still applies.
 
@@ -108,6 +108,12 @@ message and the browser's user agent instead of leaving an empty screen.
 Real TV testing is still required; desktop browser tests cannot establish firmware compatibility.
 
 ## Deploy
+
+Deploy to your own Cloudflare account. `wrangler.jsonc` contains the application's
+shared runtime configuration; it contains no account ID or personal domain.
+Choose your own Worker name in that file and use the URL printed after deployment.
+Keep account credentials and `ADMIN_TOKEN` out of Git; local secrets belong in
+the git-ignored `.dev.vars` file.
 
 ```bash
 npx wrangler login
